@@ -13,7 +13,7 @@ internal class HeaderPage : BasePage
     /// <summary>
     /// Header info the validate that datafile is a LiteDBX file (27 bytes)
     /// </summary>
-    public const string HEADER_INFO = "** This is a LiteDBX file **";
+    public const string HEADER_INFO = "** This is a LiteDB file **";
 
     /// <summary>
     /// Datafile specification version

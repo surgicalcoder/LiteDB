@@ -195,16 +195,16 @@ public class ExpressionsExec_Tests
         // String functions
         S("'Lite' + 'DB' + 'v' + 5").ExpectValue("LiteDBv5");
         S("upper('liteDB')").ExpectValue("LITEDB");
-        S("LOWER('LiteDBX')").ExpectValue("litedb");
-        S("UPPER('LiteDBX' + '-ok')").ExpectValue("LITEDB-OK");
-        S("UPPER('LiteDBX') + '-ok'").ExpectValue("LITEDB-ok");
+        S("LOWER('LiteDB')").ExpectValue("litedb");
+        S("UPPER('LiteDB' + '-ok')").ExpectValue("LITEDB-OK");
+        S("UPPER('LiteDB') + '-ok'").ExpectValue("LITEDB-ok");
         S("UPPER(3)").ExpectValue(BsonValue.Null);
         S("SUBSTRING('LiteDBX', 0, 2)").ExpectValue("Li");
-        S("LOWER(SUBSTRING('LiteDBX', 4))").ExpectValue("db");
+        S("LOWER(SUBSTRING('LiteDB', 4))").ExpectValue("db");
         S("LPAD(STRING(27), 5, '0')").ExpectValue("00027");
         S("RPAD(STRING(27), 5, '0')").ExpectValue("27000");
         S("REPLACE('Hi', 'i', 'I')").ExpectValue("HI");
-        S("ARRAY(MAP(ITEMS(['Lite', 'LiteDBX']) => REPLACE(@, 'L', 'x')))").ExpectArray("xite", "xiteDB");
+        S("ARRAY(MAP(ITEMS(['Lite', 'LiteDB']) => REPLACE(@, 'L', 'x')))").ExpectArray("xite", "xiteDB");
 
         // String in array items
         doc = J("{ arr: ['one', 'two'] }");

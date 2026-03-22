@@ -11,7 +11,7 @@ public class DataGen
     /// </summary>
     public static IEnumerable<Person> Person()
     {
-        using (var stream = typeof(DataGen).Assembly.GetManifestResourceStream("LiteDBX.Tests.Resources.person.json"))
+        using (var stream = typeof(DataGen).Assembly.GetManifestResourceStream("LiteDbX.Tests.Resources.person.json"))
         {
             var reader = new StreamReader(stream);
 
