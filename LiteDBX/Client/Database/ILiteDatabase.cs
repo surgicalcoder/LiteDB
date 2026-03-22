@@ -1,153 +1,135 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using LiteDbX.Engine;
 
 namespace LiteDbX;
 
-public interface ILiteDatabase : IDisposable
+/// <summary>
+/// Async-only public database contract.
+///
+/// All data operations, maintenance, and schema management are async.
+/// The former ambient per-thread transaction model (<c>BeginTrans</c>, <c>Commit</c>, <c>Rollback</c>)
+/// has been replaced with explicit <see cref="ILiteTransaction"/> scope objects via
+/// <see cref="BeginTransaction"/>.
+///
+/// Lifecycle:
+/// - Open/create the database with a factory or builder (implementation detail deferred to later phases).
+/// - Use <c>await using</c> for deterministic async disposal.
+///
+/// Phase 2 (Transactions and Locking) will implement the transaction scope association.
+/// Phase 3 (Disk) will make open/close/checkpoint genuinely async.
+/// </summary>
+public interface ILiteDatabase : IAsyncDisposable
 {
-    /// <summary>
-    /// Get current instance of BsonMapper used in this database instance (can be BsonMapper.Global)
-    /// </summary>
+    // ── Configuration ─────────────────────────────────────────────────────────
+
+    /// <summary>The <see cref="BsonMapper"/> instance used by this database.</summary>
     BsonMapper Mapper { get; }
 
     /// <summary>
-    /// Returns a special collection for storage files/stream inside datafile. Use _files and _chunks collection names. FileId
-    /// is implemented as string. Use "GetStorage" for custom options
+    /// Default file storage using <c>_files</c> and <c>_chunks</c> collection names with <c>string</c> file IDs.
     /// </summary>
     ILiteStorage<string> FileStorage { get; }
 
-    /// <summary>
-    /// Get/Set database user version - use this version number to control database change model
-    /// </summary>
+    /// <summary>User-defined database schema version number.</summary>
     int UserVersion { get; set; }
 
-    /// <summary>
-    /// Get/Set database timeout - this timeout is used to wait for unlock using transactions
-    /// </summary>
+    /// <summary>Timeout used when waiting for lock acquisition.</summary>
     TimeSpan Timeout { get; set; }
 
-    /// <summary>
-    /// Get/Set if database will deserialize dates in UTC timezone or Local timezone (default: Local)
-    /// </summary>
+    /// <summary>When <c>true</c>, dates are returned in UTC; otherwise local time.</summary>
     bool UtcDate { get; set; }
 
-    /// <summary>
-    /// Get/Set database limit size (in bytes). New value must be equals or larger than current database size
-    /// </summary>
+    /// <summary>Maximum allowed data file size in bytes.</summary>
     long LimitSize { get; set; }
 
     /// <summary>
-    /// Get/Set in how many pages (8 Kb each page) log file will auto checkpoint (copy from log file to data file). Use 0 to
-    /// manual-only checkpoint (and no checkpoint on dispose)
-    /// Default: 1000 pages
+    /// Number of WAL pages that trigger an auto-checkpoint. Use 0 for manual-only checkpointing.
+    /// Default: 1000.
     /// </summary>
     int CheckpointSize { get; set; }
 
-    /// <summary>
-    /// Get database collection (this options can be changed only in rebuild proces)
-    /// </summary>
+    /// <summary>Read-only collation used by this database (changeable only via rebuild).</summary>
     Collation Collation { get; }
 
-    /// <summary>
-    /// Get a collection using a entity class as strong typed document. If collection does not exits, create a new one.
-    /// </summary>
-    /// <param name="name">Collection name (case insensitive)</param>
-    /// <param name="autoId">Define autoId data type (when object contains no id field)</param>
+    // ── Collection access (sync factory — returns a handle, no I/O occurs here) ──
+
+    /// <summary>Get or create a typed collection by explicit name.</summary>
     ILiteCollection<T> GetCollection<T>(string name, BsonAutoId autoId = BsonAutoId.ObjectId);
 
-    /// <summary>
-    /// Get a collection using a name based on typeof(T).Name (BsonMapper.ResolveCollectionName function)
-    /// </summary>
+    /// <summary>Get or create a typed collection whose name is derived from <typeparamref name="T"/>.</summary>
     ILiteCollection<T> GetCollection<T>();
 
-    /// <summary>
-    /// Get a collection using a name based on typeof(T).Name (BsonMapper.ResolveCollectionName function)
-    /// </summary>
+    /// <summary>Get or create a typed collection whose name is derived from <typeparamref name="T"/>.</summary>
     ILiteCollection<T> GetCollection<T>(BsonAutoId autoId);
 
-    /// <summary>
-    /// Get a collection using a generic BsonDocument. If collection does not exits, create a new one.
-    /// </summary>
-    /// <param name="name">Collection name (case insensitive)</param>
-    /// <param name="autoId">Define autoId data type (when document contains no _id field)</param>
+    /// <summary>Get or create an untyped <see cref="BsonDocument"/> collection by name.</summary>
     ILiteCollection<BsonDocument> GetCollection(string name, BsonAutoId autoId = BsonAutoId.ObjectId);
 
-    /// <summary>
-    /// Initialize a new transaction. Transaction are created "per-thread". There is only one single transaction per thread.
-    /// Return true if transaction was created or false if current thread already in a transaction.
-    /// </summary>
-    bool BeginTrans();
+    // ── File storage (sync factory — no I/O at handle creation time) ──────────
 
     /// <summary>
-    /// Commit current transaction
-    /// </summary>
-    bool Commit();
-
-    /// <summary>
-    /// Rollback current transaction
-    /// </summary>
-    bool Rollback();
-
-    /// <summary>
-    /// Get new instance of Storage using custom FileId type, custom "_files" collection name and custom "_chunks" collection.
-    /// LiteDBX support multiples file storages (using different files/chunks collection names)
+    /// Get a file storage instance using custom collection names and a custom file ID type.
     /// </summary>
     ILiteStorage<TFileId> GetStorage<TFileId>(string filesCollection = "_files", string chunksCollection = "_chunks");
 
-    /// <summary>
-    /// Get all collections name inside this database.
-    /// </summary>
-    IEnumerable<string> GetCollectionNames();
+    // ── Transactions ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Checks if a collection exists on database. Collection name is case insensitive
+    /// Begin an explicit async transaction scope.
+    /// Dispose the returned <see cref="ILiteTransaction"/> without committing to trigger a rollback.
     /// </summary>
-    bool CollectionExists(string name);
+    ValueTask<ILiteTransaction> BeginTransaction(CancellationToken cancellationToken = default);
+
+    // ── Schema management ─────────────────────────────────────────────────────
+
+    /// <summary>Stream all collection names in this database.</summary>
+    IAsyncEnumerable<string> GetCollectionNames(CancellationToken cancellationToken = default);
+
+    /// <summary>Returns <c>true</c> if a collection with the given name exists.</summary>
+    ValueTask<bool> CollectionExists(string name, CancellationToken cancellationToken = default);
+
+    /// <summary>Drop a collection and all its data and indexes. Returns <c>true</c> if it existed.</summary>
+    ValueTask<bool> DropCollection(string name, CancellationToken cancellationToken = default);
+
+    /// <summary>Rename a collection. Returns <c>false</c> if <paramref name="oldName"/> does not exist or <paramref name="newName"/> is already taken.</summary>
+    ValueTask<bool> RenameCollection(string oldName, string newName, CancellationToken cancellationToken = default);
+
+    // ── SQL execution ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Drop a collection and all data + indexes
+    /// Execute one or more SQL commands supplied via a <see cref="TextReader"/> and return an async cursor.
+    /// The cursor carries collection context and supports field-level access.
     /// </summary>
-    bool DropCollection(string name);
+    ValueTask<IBsonDataReader> Execute(TextReader commandReader, BsonDocument parameters = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Execute a SQL command string and return an async cursor.</summary>
+    ValueTask<IBsonDataReader> Execute(string command, BsonDocument parameters = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Execute a SQL command string with positional parameters and return an async cursor.</summary>
+    ValueTask<IBsonDataReader> Execute(string command, params BsonValue[] args);
+
+    // ── Maintenance ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Rename a collection. Returns false if oldName does not exists or newName already exists
+    /// Flush all committed WAL pages to the main data file.
     /// </summary>
-    bool RenameCollection(string oldName, string newName);
+    ValueTask Checkpoint(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Execute SQL commands and return as data reader.
+    /// Rebuild the database file, reclaiming unused pages.
+    /// Returns the new size of the data file in bytes.
     /// </summary>
-    IBsonDataReader Execute(TextReader commandReader, BsonDocument parameters = null);
+    ValueTask<long> Rebuild(RebuildOptions options = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute SQL commands and return as data reader
-    /// </summary>
-    IBsonDataReader Execute(string command, BsonDocument parameters = null);
+    // ── Pragmas ───────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Execute SQL commands and return as data reader
-    /// </summary>
-    IBsonDataReader Execute(string command, params BsonValue[] args);
+    /// <summary>Read an internal engine pragma value.</summary>
+    ValueTask<BsonValue> Pragma(string name, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Do database checkpoint. Copy all commited transaction from log file into datafile.
-    /// </summary>
-    void Checkpoint();
-
-    /// <summary>
-    /// Rebuild all database to remove unused pages - reduce data file
-    /// </summary>
-    long Rebuild(RebuildOptions options = null);
-
-    /// <summary>
-    /// Get value from internal engine variables
-    /// </summary>
-    BsonValue Pragma(string name);
-
-    /// <summary>
-    /// Set new value to internal engine variables
-    /// </summary>
-    BsonValue Pragma(string name, BsonValue value);
+    /// <summary>Write an internal engine pragma value. Returns the old value.</summary>
+    ValueTask<BsonValue> Pragma(string name, BsonValue value, CancellationToken cancellationToken = default);
 }

@@ -1,55 +1,141 @@
 ﻿using System.Collections.Generic;
-using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace LiteDbX;
 
 /// <summary>
-/// Implement some Enumerable methods to IBsonDataReader
+/// Async extension methods for <see cref="IBsonDataReader"/>.
 /// </summary>
 public static class BsonDataReaderExtensions
 {
-    public static IEnumerable<BsonValue> ToEnumerable(this IBsonDataReader reader)
+    /// <summary>
+    /// Streams all values from <paramref name="reader"/> as an <see cref="IAsyncEnumerable{BsonValue}"/>.
+    /// The reader is disposed when the enumeration completes or is abandoned.
+    /// </summary>
+    public static async IAsyncEnumerable<BsonValue> ToAsyncEnumerable(
+        this IBsonDataReader reader,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        try
+        await using (reader)
         {
-            while (reader.Read())
+            while (await reader.Read(cancellationToken).ConfigureAwait(false))
             {
                 yield return reader.Current;
             }
         }
-        finally
+    }
+
+    /// <summary>
+    /// Materialise all values into a list.
+    /// </summary>
+    public static async ValueTask<List<BsonValue>> ToList(
+        this IBsonDataReader reader,
+        CancellationToken cancellationToken = default)
+    {
+        var list = new List<BsonValue>();
+        await using (reader)
         {
-            reader.Dispose();
+            while (await reader.Read(cancellationToken).ConfigureAwait(false))
+            {
+                list.Add(reader.Current);
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Materialise all values into an array.
+    /// </summary>
+    public static async ValueTask<BsonValue[]> ToArray(
+        this IBsonDataReader reader,
+        CancellationToken cancellationToken = default)
+    {
+        return (await reader.ToList(cancellationToken).ConfigureAwait(false)).ToArray();
+    }
+
+    /// <summary>
+    /// Return the first value, throwing if the result set is empty.
+    /// </summary>
+    public static async ValueTask<BsonValue> First(
+        this IBsonDataReader reader,
+        CancellationToken cancellationToken = default)
+    {
+        await using (reader)
+        {
+            if (await reader.Read(cancellationToken).ConfigureAwait(false))
+            {
+                return reader.Current;
+            }
+        }
+        throw new System.InvalidOperationException("Sequence contains no elements.");
+    }
+
+    /// <summary>
+    /// Return the first value, or <see cref="BsonValue.Null"/> if the result set is empty.
+    /// </summary>
+    public static async ValueTask<BsonValue> FirstOrDefault(
+        this IBsonDataReader reader,
+        CancellationToken cancellationToken = default)
+    {
+        await using (reader)
+        {
+            if (await reader.Read(cancellationToken).ConfigureAwait(false))
+            {
+                return reader.Current;
+            }
+        }
+        return BsonValue.Null;
+    }
+
+    /// <summary>
+    /// Return the single value, throwing if the result set is empty or contains more than one value.
+    /// </summary>
+    public static async ValueTask<BsonValue> Single(
+        this IBsonDataReader reader,
+        CancellationToken cancellationToken = default)
+    {
+        await using (reader)
+        {
+            if (!await reader.Read(cancellationToken).ConfigureAwait(false))
+            {
+                throw new System.InvalidOperationException("Sequence contains no elements.");
+            }
+
+            var value = reader.Current;
+
+            if (await reader.Read(cancellationToken).ConfigureAwait(false))
+            {
+                throw new System.InvalidOperationException("Sequence contains more than one element.");
+            }
+
+            return value;
         }
     }
 
-    public static BsonValue[] ToArray(this IBsonDataReader reader)
+    /// <summary>
+    /// Return the single value, or <see cref="BsonValue.Null"/> if the result set is empty.
+    /// Throws if the result set contains more than one value.
+    /// </summary>
+    public static async ValueTask<BsonValue> SingleOrDefault(
+        this IBsonDataReader reader,
+        CancellationToken cancellationToken = default)
     {
-        return ToEnumerable(reader).ToArray();
-    }
+        await using (reader)
+        {
+            if (!await reader.Read(cancellationToken).ConfigureAwait(false))
+            {
+                return BsonValue.Null;
+            }
 
-    public static IList<BsonValue> ToList(this IBsonDataReader reader)
-    {
-        return ToEnumerable(reader).ToList();
-    }
+            var value = reader.Current;
 
-    public static BsonValue First(this IBsonDataReader reader)
-    {
-        return ToEnumerable(reader).First();
-    }
+            if (await reader.Read(cancellationToken).ConfigureAwait(false))
+            {
+                throw new System.InvalidOperationException("Sequence contains more than one element.");
+            }
 
-    public static BsonValue FirstOrDefault(this IBsonDataReader reader)
-    {
-        return ToEnumerable(reader).FirstOrDefault();
-    }
-
-    public static BsonValue Single(this IBsonDataReader reader)
-    {
-        return ToEnumerable(reader).Single();
-    }
-
-    public static BsonValue SingleOrDefault(this IBsonDataReader reader)
-    {
-        return ToEnumerable(reader).SingleOrDefault();
+            return value;
+        }
     }
 }

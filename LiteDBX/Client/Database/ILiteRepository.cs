@@ -1,156 +1,113 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace LiteDbX;
 
-public interface ILiteRepository : IDisposable
+/// <summary>
+/// Async-only repository convenience wrapper.
+///
+/// All operations that touch storage are async.
+/// The query builder (<see cref="Query{T}"/>) is synchronous because it only builds a plan.
+/// Lifecycle is managed by <see cref="IAsyncDisposable"/> since the repository owns
+/// an <see cref="ILiteDatabase"/> reference.
+/// </summary>
+public interface ILiteRepository : IAsyncDisposable
 {
-    /// <summary>
-    /// Get database instance
-    /// </summary>
+    /// <summary>The underlying database instance.</summary>
     ILiteDatabase Database { get; }
 
-    /// <summary>
-    /// Insert a new document into collection. Document Id must be a new value in collection - Returns document Id
-    /// </summary>
-    BsonValue Insert<T>(T entity, string collectionName = null);
+    // ── Insert ────────────────────────────────────────────────────────────────
+
+    /// <summary>Insert a document. Returns the auto-generated or existing <c>_id</c>.</summary>
+    ValueTask<BsonValue> Insert<T>(T entity, string collectionName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Insert a batch of documents. Returns the number inserted.</summary>
+    ValueTask<int> Insert<T>(IEnumerable<T> entities, string collectionName = null, CancellationToken cancellationToken = default);
+
+    // ── Update ────────────────────────────────────────────────────────────────
+
+    /// <summary>Update a document. Returns <c>false</c> if not found.</summary>
+    ValueTask<bool> Update<T>(T entity, string collectionName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Update a batch of documents. Returns the number updated.</summary>
+    ValueTask<int> Update<T>(IEnumerable<T> entities, string collectionName = null, CancellationToken cancellationToken = default);
+
+    // ── Upsert ────────────────────────────────────────────────────────────────
+
+    /// <summary>Insert or update a document. Returns <c>true</c> if inserted.</summary>
+    ValueTask<bool> Upsert<T>(T entity, string collectionName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Insert or update a batch of documents. Returns the number inserted.</summary>
+    ValueTask<int> Upsert<T>(IEnumerable<T> entities, string collectionName = null, CancellationToken cancellationToken = default);
+
+    // ── Delete ────────────────────────────────────────────────────────────────
+
+    /// <summary>Delete a document by <c>_id</c>. Returns <c>true</c> if it was found and deleted.</summary>
+    ValueTask<bool> Delete<T>(BsonValue id, string collectionName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Delete documents matching a BsonExpression predicate. Returns the number deleted.</summary>
+    ValueTask<int> DeleteMany<T>(BsonExpression predicate, string collectionName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Delete documents matching a LINQ predicate. Returns the number deleted.</summary>
+    ValueTask<int> DeleteMany<T>(Expression<Func<T, bool>> predicate, string collectionName = null, CancellationToken cancellationToken = default);
+
+    // ── Query (sync builder — no I/O) ─────────────────────────────────────────
 
     /// <summary>
-    /// Insert an array of new documents into collection. Document Id must be a new value in collection. Can be set buffer size
-    /// to commit at each N documents
-    /// </summary>
-    int Insert<T>(IEnumerable<T> entities, string collectionName = null);
-
-    /// <summary>
-    /// Update a document into collection. Returns false if not found document in collection
-    /// </summary>
-    bool Update<T>(T entity, string collectionName = null);
-
-    /// <summary>
-    /// Update all documents
-    /// </summary>
-    int Update<T>(IEnumerable<T> entities, string collectionName = null);
-
-    /// <summary>
-    /// Insert or Update a document based on _id key. Returns true if insert entity or false if update entity
-    /// </summary>
-    bool Upsert<T>(T entity, string collectionName = null);
-
-    /// <summary>
-    /// Insert or Update all documents based on _id key. Returns entity count that was inserted
-    /// </summary>
-    int Upsert<T>(IEnumerable<T> entities, string collectionName = null);
-
-    /// <summary>
-    /// Delete entity based on _id key
-    /// </summary>
-    bool Delete<T>(BsonValue id, string collectionName = null);
-
-    /// <summary>
-    /// Delete entity based on Query
-    /// </summary>
-    int DeleteMany<T>(BsonExpression predicate, string collectionName = null);
-
-    /// <summary>
-    /// Delete entity based on predicate filter expression
-    /// </summary>
-    int DeleteMany<T>(Expression<Func<T, bool>> predicate, string collectionName = null);
-
-    /// <summary>
-    /// Returns new instance of LiteQueryable that provides all method to query any entity inside collection. Use fluent API to
-    /// apply filter/includes an than run any execute command, like ToList() or First()
+    /// Return a fluent query builder for <typeparamref name="T"/>.
+    /// Execution is deferred until a terminal async operation is called.
     /// </summary>
     ILiteQueryable<T> Query<T>(string collectionName = null);
 
-    /// <summary>
-    /// Create a new permanent index in all documents inside this collections if index not exists already. Returns true if
-    /// index was created or false if already exits
-    /// </summary>
-    /// <param name="name">Index name - unique name for this collection</param>
-    /// <param name="expression">Create a custom expression function to be indexed</param>
-    /// <param name="unique">If is a unique index</param>
-    /// <param name="collectionName">Collection Name</param>
-    bool EnsureIndex<T>(string name, BsonExpression expression, bool unique = false, string collectionName = null);
+    // ── Index management ──────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Create a new permanent index in all documents inside this collections if index not exists already. Returns true if
-    /// index was created or false if already exits
-    /// </summary>
-    /// <param name="expression">Create a custom expression function to be indexed</param>
-    /// <param name="unique">If is a unique index</param>
-    /// <param name="collectionName">Collection Name</param>
-    bool EnsureIndex<T>(BsonExpression expression, bool unique = false, string collectionName = null);
+    /// <summary>Create a named index if it does not already exist.</summary>
+    ValueTask<bool> EnsureIndex<T>(string name, BsonExpression expression, bool unique = false, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Create a new permanent index in all documents inside this collections if index not exists already.
-    /// </summary>
-    /// <param name="keySelector">LinqExpression to be converted into BsonExpression to be indexed</param>
-    /// <param name="unique">Create a unique keys index?</param>
-    /// <param name="collectionName">Collection Name</param>
-    bool EnsureIndex<T, K>(Expression<Func<T, K>> keySelector, bool unique = false, string collectionName = null);
+    /// <summary>Create an index on a BsonExpression if it does not already exist.</summary>
+    ValueTask<bool> EnsureIndex<T>(BsonExpression expression, bool unique = false, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Create a new permanent index in all documents inside this collections if index not exists already.
-    /// </summary>
-    /// <param name="name">Index name - unique name for this collection</param>
-    /// <param name="keySelector">LinqExpression to be converted into BsonExpression to be indexed</param>
-    /// <param name="unique">Create a unique keys index?</param>
-    /// <param name="collectionName">Collection Name</param>
-    bool EnsureIndex<T, K>(string name, Expression<Func<T, K>> keySelector, bool unique = false, string collectionName = null);
+    /// <summary>Create an index from a LINQ key selector if it does not already exist.</summary>
+    ValueTask<bool> EnsureIndex<T, K>(Expression<Func<T, K>> keySelector, bool unique = false, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Search for a single instance of T by Id. Shortcut from Query.SingleById
-    /// </summary>
-    T SingleById<T>(BsonValue id, string collectionName = null);
+    /// <summary>Create a named index from a LINQ key selector if it does not already exist.</summary>
+    ValueTask<bool> EnsureIndex<T, K>(string name, Expression<Func<T, K>> keySelector, bool unique = false, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).ToList();
-    /// </summary>
-    List<T> Fetch<T>(BsonExpression predicate, string collectionName = null);
+    // ── Convenience queries ───────────────────────────────────────────────────
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).ToList();
-    /// </summary>
-    List<T> Fetch<T>(Expression<Func<T, bool>> predicate, string collectionName = null);
+    /// <summary>Find a single document by <c>_id</c>. Throws if not found.</summary>
+    ValueTask<T> SingleById<T>(BsonValue id, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).First();
-    /// </summary>
-    T First<T>(BsonExpression predicate, string collectionName = null);
+    /// <summary>Fetch all documents matching a BsonExpression predicate into a list.</summary>
+    ValueTask<List<T>> Fetch<T>(BsonExpression predicate, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).First();
-    /// </summary>
-    T First<T>(Expression<Func<T, bool>> predicate, string collectionName = null);
+    /// <summary>Fetch all documents matching a LINQ predicate into a list.</summary>
+    ValueTask<List<T>> Fetch<T>(Expression<Func<T, bool>> predicate, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).FirstOrDefault();
-    /// </summary>
-    T FirstOrDefault<T>(BsonExpression predicate, string collectionName = null);
+    /// <summary>Return the first document matching a BsonExpression predicate. Throws if not found.</summary>
+    ValueTask<T> First<T>(BsonExpression predicate, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).FirstOrDefault();
-    /// </summary>
-    T FirstOrDefault<T>(Expression<Func<T, bool>> predicate, string collectionName = null);
+    /// <summary>Return the first document matching a LINQ predicate. Throws if not found.</summary>
+    ValueTask<T> First<T>(Expression<Func<T, bool>> predicate, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).Single();
-    /// </summary>
-    T Single<T>(BsonExpression predicate, string collectionName = null);
+    /// <summary>Return the first document matching a BsonExpression predicate, or default if not found.</summary>
+    ValueTask<T> FirstOrDefault<T>(BsonExpression predicate, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).Single();
-    /// </summary>
-    T Single<T>(Expression<Func<T, bool>> predicate, string collectionName = null);
+    /// <summary>Return the first document matching a LINQ predicate, or default if not found.</summary>
+    ValueTask<T> FirstOrDefault<T>(Expression<Func<T, bool>> predicate, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).SingleOrDefault();
-    /// </summary>
-    T SingleOrDefault<T>(BsonExpression predicate, string collectionName = null);
+    /// <summary>Return the single document matching a BsonExpression predicate. Throws if not exactly one.</summary>
+    ValueTask<T> Single<T>(BsonExpression predicate, string collectionName = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Execute Query[T].Where(predicate).SingleOrDefault();
-    /// </summary>
-    T SingleOrDefault<T>(Expression<Func<T, bool>> predicate, string collectionName = null);
+    /// <summary>Return the single document matching a LINQ predicate. Throws if not exactly one.</summary>
+    ValueTask<T> Single<T>(Expression<Func<T, bool>> predicate, string collectionName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Return the single document matching a BsonExpression predicate, or default if not found. Throws if more than one.</summary>
+    ValueTask<T> SingleOrDefault<T>(BsonExpression predicate, string collectionName = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Return the single document matching a LINQ predicate, or default if not found. Throws if more than one.</summary>
+    ValueTask<T> SingleOrDefault<T>(Expression<Func<T, bool>> predicate, string collectionName = null, CancellationToken cancellationToken = default);
 }
