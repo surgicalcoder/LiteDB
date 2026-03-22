@@ -56,7 +56,7 @@ public class DataGen
     /// </summary>
     public static IEnumerable<Zip> Zip()
     {
-        using (var stream = typeof(DataGen).Assembly.GetManifestResourceStream("LiteDBX.Tests.Resources.zip.json"))
+        using (var stream = typeof(DataGen).Assembly.GetManifestResourceStream("LiteDbX.Tests.Resources.zip.json"))
         {
             var reader = new StreamReader(stream);
 
