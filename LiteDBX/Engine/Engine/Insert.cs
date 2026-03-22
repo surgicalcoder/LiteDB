@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -9,21 +11,14 @@ public partial class LiteEngine
     /// <summary>
     /// Insert all documents in collection. If document has no _id, use AutoId generation.
     /// </summary>
-    public int Insert(string collection, IEnumerable<BsonDocument> docs, BsonAutoId autoId)
+    public ValueTask<int> Insert(string collection, IEnumerable<BsonDocument> docs, BsonAutoId autoId, CancellationToken cancellationToken = default)
     {
-        if (collection.IsNullOrWhiteSpace())
-        {
-            throw new ArgumentNullException(nameof(collection));
-        }
+        if (collection.IsNullOrWhiteSpace()) throw new ArgumentNullException(nameof(collection));
+        if (docs == null) throw new ArgumentNullException(nameof(docs));
 
-        if (docs == null)
+        return AutoTransactionAsync(async (transaction, ct) =>
         {
-            throw new ArgumentNullException(nameof(docs));
-        }
-
-        return AutoTransaction(transaction =>
-        {
-            var snapshot = transaction.CreateSnapshot(LockMode.Write, collection, true);
+            var snapshot = await transaction.CreateSnapshotAsync(LockMode.Write, collection, true, ct).ConfigureAwait(false);
             var count = 0;
             var indexer = new IndexService(snapshot, _header.Pragmas.Collation, _disk.MAX_ITEMS_COUNT);
             var data = new DataService(snapshot, _disk.MAX_ITEMS_COUNT);
@@ -33,16 +28,13 @@ public partial class LiteEngine
             foreach (var doc in docs)
             {
                 _state.Validate();
-
                 transaction.Safepoint();
-
                 InsertDocument(snapshot, doc, autoId, indexer, data);
-
                 count++;
             }
 
             return count;
-        });
+        }, cancellationToken);
     }
 
     /// <summary>

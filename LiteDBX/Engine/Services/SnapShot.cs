@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -41,7 +43,8 @@ internal class Snapshot : IDisposable
         WalIndexService walIndex,
         DiskReader reader,
         DiskService disk,
-        bool addIfNotExists)
+        bool addIfNotExists,
+        bool lockAlreadyAcquired = false)
     {
         Mode = mode;
         CollectionName = collectionName;
@@ -53,10 +56,12 @@ internal class Snapshot : IDisposable
         _reader = reader;
         _disk = disk;
 
-        // enter in lock mode according initial mode
-        if (mode == LockMode.Write)
+        // Phase 2: lock is either pre-acquired by CreateAsync (async path) or acquired here via sync bridge.
+        if (mode == LockMode.Write && !lockAlreadyAcquired)
         {
-            _locker.EnterLock(CollectionName);
+            // Phase 3 bridge: EnterLockSync blocks the calling thread.
+            // All callers through AutoTransactionAsync use CreateAsync instead.
+            _locker.EnterLockSync(CollectionName);
         }
 
         // get lastest read version from wal-index
@@ -73,6 +78,31 @@ internal class Snapshot : IDisposable
             // local pages contains only data/index pages
             _localPages.Remove(_collectionPage.PageID);
         }
+    }
+
+    /// <summary>
+    /// Phase 2 async factory. Acquires the write lock asynchronously before constructing the snapshot.
+    /// Use this from <see cref="TransactionService.CreateSnapshotAsync"/> and all async engine paths.
+    /// </summary>
+    internal static async ValueTask<Snapshot> CreateAsync(
+        LockMode mode,
+        string collectionName,
+        HeaderPage header,
+        uint transactionID,
+        TransactionPages transPages,
+        LockService locker,
+        WalIndexService walIndex,
+        DiskReader reader,
+        DiskService disk,
+        bool addIfNotExists,
+        CancellationToken ct = default)
+    {
+        if (mode == LockMode.Write)
+        {
+            await locker.EnterLockAsync(collectionName, ct).ConfigureAwait(false);
+        }
+
+        return new Snapshot(mode, collectionName, header, transactionID, transPages, locker, walIndex, reader, disk, addIfNotExists, lockAlreadyAcquired: true);
     }
 
     // expose

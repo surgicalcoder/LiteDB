@@ -1,13 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
 
 /// <summary>
-/// Represent a single transaction service. Need a new instance for each transaction.
-/// You must run each transaction in a different thread - no 2 transaction in same thread (locks as per-thread)
+/// Manages state and page access for a single transaction.
+///
+/// Phase 2 redesign:
+/// <list type="bullet">
+///   <item><c>ThreadID</c> property removed — transaction ownership is no longer thread-affine.</item>
+///   <item><see cref="CreateSnapshotAsync"/> added as the Phase 2 async path for snapshot creation.</item>
+///   <item><see cref="CreateSnapshot"/> retained as Phase 3 bridge for legacy sync callers (QueryExecutor).</item>
+/// </list>
 /// </summary>
 internal class TransactionService : IDisposable
 {
@@ -44,7 +52,7 @@ internal class TransactionService : IDisposable
     }
 
     // expose (as read only)
-    public int ThreadID { get; } = Environment.CurrentManagedThreadId;
+    // ThreadID removed in Phase 2 — transaction ownership is no longer thread-affine.
 
     public uint TransactionID { get; }
 
@@ -73,24 +81,9 @@ internal class TransactionService : IDisposable
     public bool ExplicitTransaction { get; set; } = false;
 
     /// <summary>
-    /// Public implementation of Dispose pattern.
-    /// </summary>
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    /// <summary>
-    /// Finalizer: Will be called once a thread is closed. The TransactionMonitor._slot releases the used TransactionService.
-    /// </summary>
-    ~TransactionService()
-    {
-        Dispose(false);
-    }
-
-    /// <summary>
-    /// Create (or get from transaction-cache) snapshot and return
+    /// Create (or get from transaction-cache) snapshot and return.
+    /// Phase 3 bridge: uses synchronous lock acquisition via <see cref="LockService.EnterLockSync"/>.
+    /// Use <see cref="CreateSnapshotAsync"/> for Phase 2+ async callers.
     /// </summary>
     public Snapshot CreateSnapshot(LockMode mode, string collection, bool addIfNotExists)
     {
@@ -98,32 +91,24 @@ internal class TransactionService : IDisposable
 
         Snapshot create()
         {
-            return new Snapshot(mode, collection, _header, TransactionID, Pages, _locker, _walIndex, _reader, _disk, addIfNotExists);
+            // lockAlreadyAcquired=false: constructor will call EnterLockSync (Phase 3 bridge)
+            return new Snapshot(mode, collection, _header, TransactionID, Pages, _locker, _walIndex, _reader, _disk, addIfNotExists, lockAlreadyAcquired: false);
         }
 
         if (_snapshots.TryGetValue(collection, out var snapshot))
         {
-            // if current snapshot are ReadOnly but request is about Write mode, dispose read and re-create new in WriteMode
-            // or if a previous snapshot was opened with addIfNotExists=false
             if ((mode == LockMode.Write && snapshot.Mode == LockMode.Read) || (addIfNotExists && snapshot.CollectionPage == null))
             {
-                // dispose current read-only snapshot
                 snapshot.Dispose();
-
-                // must remove before try add again - create() method can throw lock exception
                 _snapshots.Remove(collection);
-
-                // create new snapshot with write mode
                 _snapshots[collection] = snapshot = create();
             }
         }
         else
         {
-            // if not exits, let's create here
             _snapshots[collection] = snapshot = create();
         }
 
-        // update transaction mode to write in first write snaphost request
         if (mode == LockMode.Write)
         {
             Mode = LockMode.Write;
@@ -131,6 +116,53 @@ internal class TransactionService : IDisposable
 
         return snapshot;
     }
+
+    /// <summary>
+    /// Async version of <see cref="CreateSnapshot"/>. Acquires the collection write lock asynchronously.
+    /// This is the Phase 2 primary path; use this from all callers within <c>AutoTransactionAsync</c>.
+    /// </summary>
+    public async ValueTask<Snapshot> CreateSnapshotAsync(LockMode mode, string collection, bool addIfNotExists, CancellationToken ct = default)
+    {
+        ENSURE(State == TransactionState.Active, "transaction must be active to create new snapshot");
+
+        async ValueTask<Snapshot> createAsync()
+        {
+            return await Snapshot.CreateAsync(mode, collection, _header, TransactionID, Pages, _locker, _walIndex, _reader, _disk, addIfNotExists, ct).ConfigureAwait(false);
+        }
+
+        if (_snapshots.TryGetValue(collection, out var snapshot))
+        {
+            if ((mode == LockMode.Write && snapshot.Mode == LockMode.Read) || (addIfNotExists && snapshot.CollectionPage == null))
+            {
+                snapshot.Dispose();
+                _snapshots.Remove(collection);
+                _snapshots[collection] = snapshot = await createAsync().ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            _snapshots[collection] = snapshot = await createAsync().ConfigureAwait(false);
+        }
+
+        if (mode == LockMode.Write)
+        {
+            Mode = LockMode.Write;
+        }
+
+        return snapshot;
+    }
+
+    /// <summary>Public implementation of Dispose pattern.</summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    // Finalizer removed in Phase 2: GC-based cleanup that called _monitor.ReleaseTransaction()
+    // was inherently thread-affine and unsafe in an async context.
+    // Users must use explicit disposal (await using LiteTransaction / explicit Release) to ensure
+    // the transaction gate is correctly released. Leaked transactions will not be auto-cleaned by GC.
 
     /// <summary>
     /// If current transaction contains too much pages, now is safe to remove clean pages from memory and flush to wal disk
@@ -420,21 +452,15 @@ internal class TransactionService : IDisposable
             // release writable snapshots
             foreach (var snapshot in _snapshots.Values.Where(x => x.Mode == LockMode.Write))
             {
-                // discard all dirty pages
                 _disk.DiscardDirtyPages(snapshot.GetWritablePages(true, true).Select(x => x.Buffer));
-
-                // discard all clean pages
                 _disk.DiscardCleanPages(snapshot.GetWritablePages(false, true).Select(x => x.Buffer));
             }
 
-            // release buffers in read-only snaphosts
+            // release buffers in read-only snapshots
             foreach (var snapshot in _snapshots.Values.Where(x => x.Mode == LockMode.Read))
             {
                 foreach (var page in snapshot.LocalPages)
-                {
                     page.Buffer.Release();
-                }
-
                 snapshot.CollectionPage?.Buffer.Release();
             }
         }
@@ -443,10 +469,9 @@ internal class TransactionService : IDisposable
 
         State = TransactionState.Disposed;
 
-        if (!dispose)
-        {
-            // Remove transaction monitor's dictionary
-            _monitor.ReleaseTransaction(this);
-        }
+        // Phase 2: the finalizer no longer calls ReleaseTransaction.
+        // ReleaseTransaction (which exits the transaction gate) must be called explicitly
+        // via LiteTransaction.DisposeAsync or TransactionMonitor.ReleaseTransaction.
     }
 }
+

@@ -1,12 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using LiteDbX.Engine;
 
 namespace LiteDbX;
 
 /// <summary>
-/// Class to read void, one or a collection of BsonValues. Used in SQL execution commands and query returns. Use local data
-/// source (IEnumerable[BsonDocument])
+/// Reads a void, single, or enumerable sequence of <see cref="BsonValue"/> results.
+///
+/// Phase 2 bridge: implements the async <see cref="IBsonDataReader"/> contract using a synchronous
+/// <see cref="IEnumerator{T}"/> source. The <see cref="Read"/> method completes synchronously and
+/// wraps the result in a completed <see cref="ValueTask{T}"/>.
+///
+/// Phase 4 (Query Pipeline) will replace this with a genuinely async pull source.
 /// </summary>
 public class BsonDataReader : IBsonDataReader
 {
@@ -16,18 +23,13 @@ public class BsonDataReader : IBsonDataReader
     private bool _disposed;
     private bool _isFirst;
 
-
-    /// <summary>
-    /// Initialize with no value
-    /// </summary>
+    /// <summary>Initialize with no value.</summary>
     internal BsonDataReader()
     {
         HasValues = false;
     }
 
-    /// <summary>
-    /// Initialize with a single value
-    /// </summary>
+    /// <summary>Initialize with a single value.</summary>
     internal BsonDataReader(BsonValue value, string collection = null)
     {
         Current = value;
@@ -35,9 +37,7 @@ public class BsonDataReader : IBsonDataReader
         Collection = collection;
     }
 
-    /// <summary>
-    /// Initialize with an IEnumerable data source
-    /// </summary>
+    /// <summary>Initialize with an IEnumerable data source.</summary>
     internal BsonDataReader(IEnumerable<BsonValue> values, string collection, EngineState state)
     {
         Collection = collection;
@@ -57,67 +57,77 @@ public class BsonDataReader : IBsonDataReader
         catch (Exception ex)
         {
             _state.Handle(ex);
-
             throw;
         }
     }
 
-    /// <summary>
-    /// Return if has any value in result
-    /// </summary>
     public bool HasValues { get; }
-
-    /// <summary>
-    /// Return current value
-    /// </summary>
     public BsonValue Current { get; private set; }
-
-    /// <summary>
-    /// Return collection name
-    /// </summary>
     public string Collection { get; }
 
+    public BsonValue this[string field] => Current.AsDocument[field] ?? BsonValue.Null;
+
+    // ── IBsonDataReader (async contract) ──────────────────────────────────────
+
     /// <summary>
-    /// Move cursor to next result. Returns true if read was possible
+    /// Advance the cursor to the next result.
+    /// Phase 2 bridge: the underlying source is still synchronous; the result is wrapped in a
+    /// completed <see cref="ValueTask{T}"/>. Phase 4 will provide a genuinely async implementation.
     /// </summary>
-    public bool Read()
+    public ValueTask<bool> Read(CancellationToken cancellationToken = default)
     {
-        if (!HasValues)
-        {
-            return false;
-        }
+        return new ValueTask<bool>(ReadSync());
+    }
+
+    /// <summary>
+    /// Internal synchronous read for legacy paths (QueryExecutor, RebuildContent).
+    /// Phase 4 will eliminate callers of this method.
+    /// </summary>
+    internal bool ReadSync()
+    {
+        if (!HasValues) return false;
 
         if (_isFirst)
         {
             _isFirst = false;
-
             return true;
         }
 
         if (_source != null)
         {
-            _state.Validate(); // checks if engine still open
+            _state.Validate();
 
             try
             {
-                var read = _source.MoveNext(); // can throw any error here
+                var read = _source.MoveNext();
                 Current = _state.ReadTransform(Collection, _source.Current);
-
                 return read;
             }
             catch (Exception ex)
             {
                 _state.Handle(ex);
-
-                throw ex;
+                throw;
             }
         }
 
         return false;
     }
 
-    public BsonValue this[string field] => Current.AsDocument[field] ?? BsonValue.Null;
+    // ── IAsyncDisposable ──────────────────────────────────────────────────────
 
+    public ValueTask DisposeAsync()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+        return default;
+    }
+
+    // ── Legacy sync dispose (kept for internal/bridge callers) ─────────────────
+
+    /// <summary>
+    /// Synchronous dispose — kept for internal callers that have not yet been converted to async.
+    /// Phase 4 will convert all callers to <see cref="DisposeAsync"/>.
+    /// </summary>
     public void Dispose()
     {
         Dispose(true);
@@ -131,16 +141,8 @@ public class BsonDataReader : IBsonDataReader
 
     protected virtual void Dispose(bool disposing)
     {
-        if (_disposed)
-        {
-            return;
-        }
-
+        if (_disposed) return;
         _disposed = true;
-
-        if (disposing)
-        {
-            _source?.Dispose();
-        }
+        if (disposing) _source?.Dispose();
     }
 }

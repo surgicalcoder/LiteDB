@@ -1,4 +1,5 @@
-﻿using System;
+﻿using System.Threading;
+using System.Threading.Tasks;
 
 namespace LiteDbX.Engine;
 
@@ -6,91 +7,106 @@ public partial class LiteEngine
 {
     /// <summary>
     /// Implement a full rebuild database. Engine will be closed and re-created in another instance.
-    /// A backup copy will be created with -backup extention. All data will be readed and re created in another database
-    /// After run, will re-open database
+    /// A backup copy will be created with -backup extension. All data will be read and re-created in
+    /// another database. After rebuild, the engine is re-opened.
+    ///
+    /// Phase 2: signature updated to match <see cref="ILiteEngine.Rebuild(RebuildOptions, CancellationToken)"/>.
+    /// Phase 3 bridge: Close, RebuildService.Rebuild, and Open are all synchronous disk operations;
+    /// returns a completed <see cref="ValueTask{T}"/>. Phase 3 (Disk and Streams) will make this async.
     /// </summary>
-    public long Rebuild(RebuildOptions options)
+    public ValueTask<long> Rebuild(RebuildOptions options, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(_settings.Filename))
         {
-            return 0; // works only with os file
+            return new ValueTask<long>(0L); // works only with OS file
         }
 
         Close();
 
-        // run build service
         var rebuilder = new RebuildService(_settings);
 
-        // return how many bytes of diference from original/rebuild version
+        // Phase 3 bridge: rebuild is still synchronous disk I/O.
         var diff = rebuilder.Rebuild(options);
 
-        // re-open engine
         Open();
-
         _state.Disposed = false;
 
-        return diff;
+        return new ValueTask<long>(diff);
     }
 
     /// <summary>
-    /// Implement a full rebuild database. A backup copy will be created with -backup extention. All data will be readed and re
-    /// created in another database
+    /// Convenience overload: rebuild using current collation and password settings.
+    /// Not part of <see cref="ILiteEngine"/> — additional helper on <see cref="LiteEngine"/>.
+    ///
+    /// Phase 3 bridge: reads collation directly from <see cref="HeaderPage.Pragmas"/> (synchronous)
+    /// to avoid sync-over-async. Phase 3 will unify this with the main async overload.
     /// </summary>
-    public long Rebuild()
+    public ValueTask<long> Rebuild(CancellationToken cancellationToken = default)
     {
-        var collation = new Collation(Pragma(Pragmas.COLLATION));
+        var collation = new Collation(_header.Pragmas.Get(Pragmas.COLLATION).AsString);
         var password = _settings.Password;
 
-        return Rebuild(new RebuildOptions { Password = password, Collation = collation });
+        return Rebuild(new RebuildOptions { Password = password, Collation = collation }, cancellationToken);
     }
 
     /// <summary>
-    /// Fill current database with data inside file reader - run inside a transacion
+    /// Fill current database with data inside file reader — runs inside a transaction.
+    /// Called exclusively by <see cref="RebuildService.Rebuild"/>.
+    ///
+    /// Phase 3 bridge: all transaction and disk operations here are synchronous.
+    /// Documents are inserted per-collection in a dedicated transaction; indexes are created
+    /// afterwards via separate auto-transactions (one per index).  This avoids nesting a
+    /// second transaction acquisition inside the outer doc-insert transaction, which was
+    /// possible in the old thread-local model but is not safe with the async model.
+    ///
+    /// The per-collection transaction approach is functionally equivalent and slightly more
+    /// memory-efficient for large data sets.
     /// </summary>
     internal void RebuildContent(IFileReader reader)
     {
-        // begin transaction and get TransactionID
-        var transaction = _monitor.GetTransaction(true, false, out _);
-
-        try
+        foreach (var collection in reader.GetCollections())
         {
-            foreach (var collection in reader.GetCollections())
+            // Phase 3 bridge: synchronous transaction entry.
+            var transaction = _monitor.GetOrCreateTransactionSync(false, out _);
+
+            try
             {
-                // get snapshot, indexer and data services
                 var snapshot = transaction.CreateSnapshot(LockMode.Write, collection, true);
                 var indexer = new IndexService(snapshot, _header.Pragmas.Collation, _disk.MAX_ITEMS_COUNT);
                 var data = new DataService(snapshot, _disk.MAX_ITEMS_COUNT);
 
-                // get all documents from current collection
-                var docs = reader.GetDocuments(collection);
-
-                // insert one-by-one
-                foreach (var doc in docs)
+                foreach (var doc in reader.GetDocuments(collection))
                 {
                     transaction.Safepoint();
-
                     InsertDocument(snapshot, doc, BsonAutoId.ObjectId, indexer, data);
                 }
 
-                // first create all user indexes (exclude _id index)
-                foreach (var index in reader.GetIndexes(collection))
+                transaction.Commit();
+                _monitor.ReleaseTransaction(transaction);
+            }
+            catch
+            {
+                if (transaction.State == TransactionState.Active)
                 {
-                    EnsureIndex(collection,
-                        index.Name,
-                        BsonExpression.Create(index.Expression),
-                        index.Unique);
+                    transaction.Rollback();
                 }
+
+                _monitor.ReleaseTransaction(transaction);
+                throw;
             }
 
-            transaction.Commit();
-
-            _monitor.ReleaseTransaction(transaction);
-        }
-        catch (Exception ex)
-        {
-            Close(ex);
-
-            throw;
+            // Index creation: each EnsureIndex creates its own auto-transaction.
+            // Phase 3 bridge: GetAwaiter().GetResult() is safe here because this code
+            // runs on a dedicated thread outside any async continuation.
+            foreach (var index in reader.GetIndexes(collection))
+            {
+                EnsureIndex(
+                    collection,
+                    index.Name,
+                    BsonExpression.Create(index.Expression),
+                    index.Unique).GetAwaiter().GetResult();
+            }
         }
     }
 }
+

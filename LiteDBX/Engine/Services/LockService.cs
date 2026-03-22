@@ -1,180 +1,199 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
 
 /// <summary>
-/// Lock service are collection-based locks. Lock will support any threads reading at same time. Writing operations will be
-/// locked
-/// based on collection. Eventualy, write operation can change header page that has an exclusive locker for.
+/// Async-safe lock service for collection-based and database-level coordination.
+///
+/// Phase 2 redesign:
+/// <list type="bullet">
+///   <item><see cref="ReaderWriterLockSlim"/> replaced with <see cref="AsyncReaderWriterLock"/> for the transaction gate.</item>
+///   <item>Per-collection <c>Monitor.TryEnter</c> replaced with <see cref="SemaphoreSlim"/>(1,1) per collection.</item>
+///   <item>All lock-entry methods are async; exit methods remain synchronous (<c>Release()</c> is always safe).</item>
+///   <item><c>IsInTransaction</c> removed — callers use <see cref="LiteTransaction.HasActive"/> instead.</item>
+/// </list>
+///
+/// Bridge methods (<c>EnterTransactionSync</c>, <c>EnterLockSync</c>) remain for internal paths that have not yet
+/// been converted to fully async (QueryExecutor, WalIndexService checkpoint). These will be eliminated in Phase 3/4.
 /// [ThreadSafe]
 /// </summary>
 internal class LockService : IDisposable
 {
-    private readonly ConcurrentDictionary<string, object> _collections = new(StringComparer.OrdinalIgnoreCase);
+    // Per-collection write semaphores: only one writer per collection at a time.
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _collections =
+        new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.OrdinalIgnoreCase);
+
     private readonly EnginePragmas _pragmas;
 
-    private readonly ReaderWriterLockSlim _transaction = new(LockRecursionPolicy.NoRecursion);
+    // Async RW lock: concurrent transactions = readers, checkpoint/rebuild = writer.
+    private readonly AsyncReaderWriterLock _transactionGate = new AsyncReaderWriterLock();
 
     internal LockService(EnginePragmas pragmas)
     {
         _pragmas = pragmas;
     }
 
-    /// <summary>
-    /// Return if current thread have open transaction
-    /// </summary>
-    public bool IsInTransaction => _transaction.IsReadLockHeld || _transaction.IsWriteLockHeld;
-
-    /// <summary>
-    /// Return how many transactions are opened
-    /// </summary>
-    public int TransactionsCount => _transaction.CurrentReadCount;
-
     public void Dispose()
+    {
+        _transactionGate.Dispose();
+        foreach (var sem in _collections.Values) sem.Dispose();
+    }
+
+    // ── Transaction gate ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the number of currently open transactions (approximate; for diagnostics).
+    /// </summary>
+    public int TransactionsCount { get; private set; }
+
+    /// <summary>
+    /// Asynchronously acquire a transaction-gate read slot.
+    /// Multiple transactions can hold this concurrently; exclusive (checkpoint/rebuild) operations block.
+    /// </summary>
+    public async ValueTask EnterTransactionAsync(CancellationToken ct = default)
     {
         try
         {
-            _transaction.Dispose();
+            await _transactionGate.EnterReadAsync(_pragmas.Timeout, ct).ConfigureAwait(false);
+            Interlocked.Increment(ref _transactionsCount);
         }
-        catch (SynchronizationLockException) { }
-    }
-
-    /// <summary>
-    /// Enter transaction read lock - should be called just before enter a new transaction
-    /// </summary>
-    public void EnterTransaction()
-    {
-        // if current thread already in exclusive mode, just exit
-        if (_transaction.IsWriteLockHeld)
-        {
-            return;
-        }
-
-        if (!_transaction.TryEnterReadLock(_pragmas.Timeout))
+        catch (TimeoutException)
         {
             throw LiteException.LockTimeout("transaction", _pragmas.Timeout);
         }
     }
 
+    private int _transactionsCount;
+
     /// <summary>
-    /// Exit transaction read lock
+    /// Phase 3/4 bridge: synchronous transaction-gate entry for code paths not yet converted to async
+    /// (e.g. <c>QueryExecutor</c>, <c>WalIndexService</c>).
+    /// Uses <see cref="SemaphoreSlim"/>.<c>Wait(timeout)</c> which blocks the calling thread.
     /// </summary>
+    internal void EnterTransactionSync()
+    {
+        try
+        {
+            _transactionGate.EnterReadAsync(_pragmas.Timeout).GetAwaiter().GetResult();
+            Interlocked.Increment(ref _transactionsCount);
+        }
+        catch (TimeoutException)
+        {
+            throw LiteException.LockTimeout("transaction", _pragmas.Timeout);
+        }
+    }
+
+    /// <summary>Release a transaction-gate read slot.</summary>
     public void ExitTransaction()
     {
-        // if current thread are in reserved mode, do not exit transaction (will be exit from ExitExclusive)
-        if (_transaction.IsWriteLockHeld)
-        {
-            return;
-        }
-
-        //This can be called when a lock has either been released by the slim or somewhere else therefore there is no lock to release from ExitReadLock()
-        if (_transaction.IsReadLockHeld)
-        {
-            try
-            {
-                _transaction.ExitReadLock();
-            }
-            catch { }
-        }
+        _transactionGate.ExitRead();
+        Interlocked.Decrement(ref _transactionsCount);
     }
 
+    // ── Collection write locks ────────────────────────────────────────────────
+
     /// <summary>
-    /// Enter collection write lock mode (only 1 collection per time can have this lock)
+    /// Asynchronously acquire the exclusive write lock for a collection.
+    /// Only one writer per collection at a time; concurrent readers are blocked by the collection semaphore.
     /// </summary>
-    public void EnterLock(string collectionName)
+    public async ValueTask EnterLockAsync(string collectionName, CancellationToken ct = default)
     {
-        ENSURE(_transaction.IsReadLockHeld || _transaction.IsWriteLockHeld, "Use EnterTransaction() before EnterLock(name)");
-
-        // get collection object lock from dictionary (or create new if doesnt exists)
-        var collection = _collections.GetOrAdd(collectionName, s => new object());
-
-        if (!Monitor.TryEnter(collection, _pragmas.Timeout))
+        var sem = _collections.GetOrAdd(collectionName, _ => new SemaphoreSlim(1, 1));
+        try
         {
-            throw LiteException.LockTimeout("write", collectionName, _pragmas.Timeout);
+            if (!await sem.WaitAsync(_pragmas.Timeout, ct).ConfigureAwait(false))
+                throw LiteException.LockTimeout("write", collectionName, _pragmas.Timeout);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
     }
 
     /// <summary>
-    /// Exit collection in reserved lock
+    /// Phase 3 bridge: synchronous collection write-lock entry for code paths not yet fully async
+    /// (e.g. <see cref="Snapshot"/> constructor called from legacy sync paths).
     /// </summary>
+    internal void EnterLockSync(string collectionName)
+    {
+        var sem = _collections.GetOrAdd(collectionName, _ => new SemaphoreSlim(1, 1));
+        if (!sem.Wait(_pragmas.Timeout))
+            throw LiteException.LockTimeout("write", collectionName, _pragmas.Timeout);
+    }
+
+    /// <summary>Release the exclusive write lock for a collection.</summary>
     public void ExitLock(string collectionName)
     {
-        if (!_collections.TryGetValue(collectionName, out var collection))
+        if (_collections.TryGetValue(collectionName, out var sem))
+        {
+            sem.Release();
+        }
+        else
         {
             throw LiteException.CollectionLockerNotFound(collectionName);
         }
-
-        Monitor.Exit(collection);
     }
 
-    /// <summary>
-    /// Enter all database in exclusive lock. Wait for all transactions finish. In exclusive mode no one can enter in new
-    /// transaction (for read/write)
-    /// If current thread already in exclusive mode, returns false
-    /// </summary>
-    public bool EnterExclusive()
-    {
-        // if current thread already in exclusive mode
-        if (_transaction.IsWriteLockHeld)
-        {
-            return false;
-        }
+    // ── Exclusive lock (checkpoint / rebuild) ─────────────────────────────────
 
-        // wait finish all transactions before enter in reserved mode
-        if (!_transaction.TryEnterWriteLock(_pragmas.Timeout))
+    /// <summary>
+    /// Asynchronously enter exclusive mode — waits for all open transactions to complete.
+    /// Used by checkpoint and rebuild operations.
+    /// Returns <c>true</c> if the lock was acquired (must call <see cref="ExitExclusive"/> afterwards).
+    /// Returns <c>false</c> if already in exclusive mode.
+    /// </summary>
+    public async ValueTask<bool> EnterExclusiveAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            await _transactionGate.EnterWriteAsync(_pragmas.Timeout, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException)
         {
             throw LiteException.LockTimeout("exclusive", _pragmas.Timeout);
         }
-
-        return true;
     }
 
     /// <summary>
-    /// Try enter in exclusive mode - if not possible, just exit with false (do not wait and no exceptions)
-    /// If mustExit returns true, must call ExitExclusive after use
+    /// Phase 3 bridge: synchronous exclusive-lock entry (used by <c>WalIndexService.Checkpoint()</c>).
+    /// </summary>
+    internal bool EnterExclusive()
+    {
+        try
+        {
+            _transactionGate.EnterWriteAsync(_pragmas.Timeout).GetAwaiter().GetResult();
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            throw LiteException.LockTimeout("exclusive", _pragmas.Timeout);
+        }
+    }
+
+    /// <summary>
+    /// Try to enter exclusive mode immediately (no wait).
+    /// Returns <c>false</c> if any readers or another writer currently holds the lock.
     /// </summary>
     public bool TryEnterExclusive(out bool mustExit)
     {
-        // if already in exclusive mode return true but "enter" indicator must be false (do not exit)
-        if (_transaction.IsWriteLockHeld)
+        if (_transactionGate.TryEnterWrite())
         {
-            mustExit = false;
-
+            mustExit = true;
             return true;
         }
 
-        // if there is any open transaction, exit with false
-        if (_transaction.IsReadLockHeld || _transaction.CurrentReadCount > 0)
-        {
-            mustExit = false;
-
-            return false;
-        }
-
-        // try enter in exclusive mode - but if not possible, just exit with false
-        if (!_transaction.TryEnterWriteLock(10))
-        {
-            mustExit = false;
-
-            return false;
-        }
-
-        ENSURE(_transaction.RecursiveReadCount == 0, "must have no other transaction here");
-
-        // now, current thread are in exclusive mode (must run ExitExclusive to exit)
-        mustExit = true;
-
-        return true;
+        mustExit = false;
+        return false;
     }
 
-    /// <summary>
-    /// Exit exclusive lock
-    /// </summary>
+    /// <summary>Release the exclusive lock.</summary>
     public void ExitExclusive()
     {
-        _transaction.ExitWriteLock();
+        _transactionGate.ExitWrite();
     }
 }

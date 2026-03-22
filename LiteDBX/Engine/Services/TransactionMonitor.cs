@@ -2,21 +2,29 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
 
 /// <summary>
-/// This class monitor all open transactions to manage memory usage for each transaction
+/// Tracks and manages all open transactions.
+///
+/// Phase 2 redesign:
+/// <list type="bullet">
+///   <item><c>ThreadLocal&lt;TransactionService&gt;</c> removed — thread identity is no longer used for ownership.</item>
+///   <item>Explicit transactions are tracked via <see cref="LiteTransaction.CurrentAmbient"/> (AsyncLocal).</item>
+///   <item><see cref="GetOrCreateTransactionAsync"/> is the primary entry point for the async operational path.</item>
+///   <item><see cref="GetOrCreateTransactionSync"/> is a Phase 4 bridge for internal code not yet converted to async.</item>
+/// </list>
 /// [Singleton - ThreadSafe]
 /// </summary>
 internal class TransactionMonitor : IDisposable
 {
     private readonly DiskService _disk;
-
     private readonly HeaderPage _header;
     private readonly LockService _locker;
-    private readonly ThreadLocal<TransactionService> _slot = new();
+    private readonly object _lock = new object();
     private readonly Dictionary<uint, TransactionService> _transactions = new();
     private readonly WalIndexService _walIndex;
 
@@ -27,193 +35,221 @@ internal class TransactionMonitor : IDisposable
         _disk = disk;
         _walIndex = walIndex;
 
-        // initialize free pages with all avaiable pages in memory
         FreePages = MAX_TRANSACTION_SIZE;
-
-        // initial size 
         InitialSize = MAX_TRANSACTION_SIZE / MAX_OPEN_TRANSACTIONS;
     }
 
-    // expose open transactions
     public ICollection<TransactionService> Transactions => _transactions.Values;
     public int FreePages { get; private set; }
-
     public int InitialSize { get; }
 
-    /// <summary>
-    /// Dispose all open transactions
-    /// </summary>
     public void Dispose()
     {
-        if (_transactions.Count > 0)
+        lock (_lock)
         {
             foreach (var transaction in _transactions.Values)
-            {
                 transaction.Dispose();
-            }
-
             _transactions.Clear();
         }
     }
 
-    public TransactionService GetTransaction(bool create, bool queryOnly, out bool isNew)
+    // ── Async entry point (Phase 2 primary path) ──────────────────────────────
+
+    /// <summary>
+    /// Get or create a transaction for the current async execution context.
+    ///
+    /// If an explicit <see cref="LiteTransaction"/> is ambient (from <see cref="LiteEngine.BeginTransaction"/>),
+    /// it is reused (<paramref name="isNew"/> = <c>false</c>).
+    ///
+    /// Otherwise a new auto-transaction is created, entered into the transaction gate, and tracked.
+    /// The caller is responsible for committing and releasing it when <paramref name="isNew"/> is <c>true</c>.
+    /// </summary>
+    public async ValueTask<(TransactionService transaction, bool isNew)> GetOrCreateTransactionAsync(
+        bool queryOnly,
+        CancellationToken ct = default)
     {
-        var transaction = _slot.Value;
-
-        if (create && transaction == null)
+        // Reuse explicit ambient transaction (set by BeginTransaction).
+        if (!queryOnly && LiteTransaction.CurrentAmbient != null)
         {
-            isNew = true;
-
-            bool alreadyLock;
-
-            // must lock _transaction before work with _transactions (GetInitialSize use _transactions)
-            lock (_transactions)
-            {
-                if (_transactions.Count >= MAX_OPEN_TRANSACTIONS)
-                {
-                    throw new LiteException(0, "Maximum number of transactions reached");
-                }
-
-                var initialSize = GetInitialSize();
-
-                // check if current thread contains any transaction
-                alreadyLock = _transactions.Values.Any(x => x.ThreadID == Environment.CurrentManagedThreadId);
-
-                transaction = new TransactionService(_header, _locker, _disk, _walIndex, initialSize, this, queryOnly);
-
-                // add transaction to execution transaction dict
-                _transactions[transaction.TransactionID] = transaction;
-            }
-
-            // enter in lock transaction after release _transaction lock
-            if (!alreadyLock)
-            {
-                try
-                {
-                    _locker.EnterTransaction();
-                }
-                catch
-                {
-                    transaction.Dispose();
-
-                    lock (_transactions)
-                    {
-                        // return pages
-                        FreePages += transaction.MaxTransactionSize;
-                        _transactions.Remove(transaction.TransactionID);
-                    }
-
-                    throw;
-                }
-            }
-
-            // do not store in thread query-only transaction
-            if (!queryOnly)
-            {
-                _slot.Value = transaction;
-            }
+            return (LiteTransaction.CurrentAmbient.Service, false);
         }
-        else
+
+        // Create a new auto-transaction or query-only transaction.
+        TransactionService transaction;
+
+        lock (_lock)
         {
-            isNew = false;
+            if (_transactions.Count >= MAX_OPEN_TRANSACTIONS)
+                throw new LiteException(0, "Maximum number of transactions reached");
+
+            var initialSize = GetInitialSize();
+            transaction = new TransactionService(_header, _locker, _disk, _walIndex, initialSize, this, queryOnly);
+            _transactions[transaction.TransactionID] = transaction;
+        }
+
+        try
+        {
+            await _locker.EnterTransactionAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (_lock)
+            {
+                FreePages += transaction.MaxTransactionSize;
+                _transactions.Remove(transaction.TransactionID);
+            }
+            transaction.Dispose();
+            throw;
+        }
+
+        return (transaction, true);
+    }
+
+    /// <summary>
+    /// Create a new explicit transaction to back a <see cref="LiteTransaction"/> scope.
+    /// Called exclusively from <see cref="LiteEngine.BeginTransaction"/>.
+    /// </summary>
+    public async ValueTask<TransactionService> CreateExplicitTransactionAsync(CancellationToken ct = default)
+    {
+        TransactionService transaction;
+
+        lock (_lock)
+        {
+            if (_transactions.Count >= MAX_OPEN_TRANSACTIONS)
+                throw new LiteException(0, "Maximum number of transactions reached");
+
+            var initialSize = GetInitialSize();
+            transaction = new TransactionService(_header, _locker, _disk, _walIndex, initialSize, this, false);
+            transaction.ExplicitTransaction = true;
+            _transactions[transaction.TransactionID] = transaction;
+        }
+
+        try
+        {
+            await _locker.EnterTransactionAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (_lock)
+            {
+                FreePages += transaction.MaxTransactionSize;
+                _transactions.Remove(transaction.TransactionID);
+            }
+            transaction.Dispose();
+            throw;
         }
 
         return transaction;
     }
 
+    // ── Sync bridge (Phase 4 target) ──────────────────────────────────────────
+
     /// <summary>
-    /// Release current thread transaction
+    /// Phase 4 bridge: synchronous version of <see cref="GetOrCreateTransactionAsync"/> for internal
+    /// code paths not yet converted (e.g. <c>QueryExecutor</c>, <c>RebuildContent</c>).
+    /// Uses blocking <see cref="LockService.EnterTransactionSync"/>.
+    /// </summary>
+    internal TransactionService GetOrCreateTransactionSync(bool queryOnly, out bool isNew)
+    {
+        // Reuse explicit ambient transaction.
+        if (!queryOnly && LiteTransaction.CurrentAmbient != null)
+        {
+            isNew = false;
+            return LiteTransaction.CurrentAmbient.Service;
+        }
+
+        TransactionService transaction;
+
+        lock (_lock)
+        {
+            if (_transactions.Count >= MAX_OPEN_TRANSACTIONS)
+                throw new LiteException(0, "Maximum number of transactions reached");
+
+            var initialSize = GetInitialSize();
+            transaction = new TransactionService(_header, _locker, _disk, _walIndex, initialSize, this, queryOnly);
+            _transactions[transaction.TransactionID] = transaction;
+        }
+
+        try
+        {
+            _locker.EnterTransactionSync(); // Phase 4 bridge: blocking wait
+        }
+        catch
+        {
+            lock (_lock)
+            {
+                FreePages += transaction.MaxTransactionSize;
+                _transactions.Remove(transaction.TransactionID);
+            }
+            transaction.Dispose();
+            throw;
+        }
+
+        isNew = true;
+        return transaction;
+    }
+
+    // ── Release ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Release a transaction: dispose it, return its pages to the pool, and exit the transaction gate.
     /// </summary>
     public void ReleaseTransaction(TransactionService transaction)
     {
-        // dispose current transaction
         transaction.Dispose();
 
-        bool keepLocked;
-
-        lock (_transactions)
+        lock (_lock)
         {
-            // remove from "open transaction" list
             _transactions.Remove(transaction.TransactionID);
-
-            // return freePages used area
             FreePages += transaction.MaxTransactionSize;
-
-            // check if current thread contains more query transactions
-            keepLocked = _transactions.Values.Any(x => x.ThreadID == Environment.CurrentManagedThreadId);
         }
 
-        // unlock thread-transaction only if there is no more transactions
-        if (!keepLocked)
-        {
-            _locker.ExitTransaction();
-        }
-
-        // remove transaction from thread if are no queryOnly transaction
-        if (!transaction.QueryOnly)
-        {
-            ENSURE(_slot.Value == transaction, "current thread must contains transaction parameter");
-
-            // clear thread slot for new transaction
-            _slot.Value = null;
-        }
+        _locker.ExitTransaction();
     }
 
+    // ── System collection helper ──────────────────────────────────────────────
+
     /// <summary>
-    /// Get transaction from current thread (from thread slot or from queryOnly) - do not created new transaction
-    /// Used only in SystemCollections to get running query transaction
+    /// Returns the <see cref="TransactionService"/> for the current ambient context.
+    /// Used by system collections to attach to the running query transaction.
+    /// Returns <c>null</c> if no explicit transaction is active.
     /// </summary>
-    public TransactionService GetThreadTransaction()
+    public TransactionService GetAmbientTransaction()
     {
-        lock (_transactions)
-        {
-            return
-                _slot.Value ??
-                _transactions.Values.FirstOrDefault(x => x.ThreadID == Environment.CurrentManagedThreadId);
-        }
+        return LiteTransaction.CurrentAmbient?.Service;
     }
 
-    /// <summary>
-    /// Get initial transaction size - get from free pages or reducing from all open transactions
-    /// </summary>
+    // ── Page budget helpers ───────────────────────────────────────────────────
+
     private int GetInitialSize()
     {
+        // called inside _lock
         if (FreePages >= InitialSize)
         {
             FreePages -= InitialSize;
-
             return InitialSize;
         }
 
         var sum = 0;
 
-        // if there is no available pages, reduce all open transactions
         foreach (var trans in _transactions.Values)
         {
-            //TODO: revisar estas contas, o reduce tem que fechar 1000
             var reduce = trans.MaxTransactionSize / InitialSize;
-
             trans.MaxTransactionSize -= reduce;
-
             sum += reduce;
         }
 
         return sum;
     }
 
-    /// <summary>
-    /// Try extend max transaction size in passed transaction ONLY if contains free pages available
-    /// </summary>
     private bool TryExtend(TransactionService trans)
     {
-        lock (_transactions)
+        lock (_lock)
         {
             if (FreePages >= InitialSize)
             {
                 trans.MaxTransactionSize += InitialSize;
-
                 FreePages -= InitialSize;
-
                 return true;
             }
 
@@ -221,9 +257,6 @@ internal class TransactionMonitor : IDisposable
         }
     }
 
-    /// <summary>
-    /// Check if transaction size reach limit AND check if is possible extend this limit
-    /// </summary>
     public bool CheckSafepoint(TransactionService trans)
     {
         return

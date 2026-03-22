@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -10,108 +12,75 @@ public partial class LiteEngine
     /// <summary>
     /// Implement update command to a document inside a collection. Return number of documents updated
     /// </summary>
-    public int Update(string collection, IEnumerable<BsonDocument> docs)
+    public ValueTask<int> Update(string collection, IEnumerable<BsonDocument> docs, CancellationToken cancellationToken = default)
     {
-        if (collection.IsNullOrWhiteSpace())
-        {
-            throw new ArgumentNullException(nameof(collection));
-        }
+        if (collection.IsNullOrWhiteSpace()) throw new ArgumentNullException(nameof(collection));
+        if (docs == null) throw new ArgumentNullException(nameof(docs));
 
-        if (docs == null)
+        return AutoTransactionAsync(async (transaction, ct) =>
         {
-            throw new ArgumentNullException(nameof(docs));
-        }
-
-        return AutoTransaction(transaction =>
-        {
-            var snapshot = transaction.CreateSnapshot(LockMode.Write, collection, false);
+            var snapshot = await transaction.CreateSnapshotAsync(LockMode.Write, collection, false, ct).ConfigureAwait(false);
             var collectionPage = snapshot.CollectionPage;
             var indexer = new IndexService(snapshot, _header.Pragmas.Collation, _disk.MAX_ITEMS_COUNT);
             var data = new DataService(snapshot, _disk.MAX_ITEMS_COUNT);
             var count = 0;
 
-            if (collectionPage == null)
-            {
-                return 0;
-            }
+            if (collectionPage == null) return 0;
 
             LOG($"update `{collection}`", "COMMAND");
 
             foreach (var doc in docs)
             {
                 _state.Validate();
-
                 transaction.Safepoint();
-
-                if (UpdateDocument(snapshot, collectionPage, doc, indexer, data))
-                {
-                    count++;
-                }
+                if (UpdateDocument(snapshot, collectionPage, doc, indexer, data)) count++;
             }
 
             return count;
-        });
+        }, cancellationToken);
     }
 
     /// <summary>
     /// Update documents using transform expression (must return a scalar/document value) using predicate as filter
     /// </summary>
-    public int UpdateMany(string collection, BsonExpression transform, BsonExpression predicate)
+    public async ValueTask<int> UpdateMany(string collection, BsonExpression transform, BsonExpression predicate, CancellationToken cancellationToken = default)
     {
-        if (collection.IsNullOrWhiteSpace())
+        if (collection.IsNullOrWhiteSpace()) throw new ArgumentNullException(nameof(collection));
+        if (transform == null) throw new ArgumentNullException(nameof(transform));
+
+        // Phase 2 bridge: read documents via sync query pipeline then update.
+        // Phase 4 will unify these into a single async streaming operation.
+        var toUpdate = new List<BsonDocument>();
+
+        var q = new Query { Select = "$", ForUpdate = true };
+        if (predicate != null) q.Where.Add(predicate);
+
+        var executor = new QueryExecutor(this, _state, _monitor, _sortDisk, _disk, _header.Pragmas, collection, q, null);
+        using var reader = executor.ExecuteQuery();
+
+        while (reader.ReadSync())
         {
-            throw new ArgumentNullException(nameof(collection));
-        }
+            var doc = reader.Current.AsDocument;
+            var id = doc["_id"];
+            var value = transform.ExecuteScalar(doc, _header.Pragmas.Collation);
 
-        if (transform == null)
-        {
-            throw new ArgumentNullException(nameof(transform));
-        }
+            if (!value.IsDocument) throw new ArgumentException("Extend expression must return a document", nameof(transform));
 
-        return Update(collection, transformDocs());
+            var result = BsonExpressionMethods.EXTEND(doc, value.AsDocument).AsDocument;
 
-        IEnumerable<BsonDocument> transformDocs()
-        {
-            var q = new Query { Select = "$", ForUpdate = true };
-
-            if (predicate != null)
+            if (result.TryGetValue("_id", out var newId))
             {
-                q.Where.Add(predicate);
+                if (newId != id) throw LiteException.InvalidUpdateField("_id");
+            }
+            else
+            {
+                result["_id"] = id;
             }
 
-            using (var reader = Query(collection, q))
-            {
-                while (reader.Read())
-                {
-                    var doc = reader.Current.AsDocument;
-
-                    var id = doc["_id"];
-                    var value = transform.ExecuteScalar(doc, _header.Pragmas.Collation);
-
-                    if (!value.IsDocument)
-                    {
-                        throw new ArgumentException("Extend expression must return a document", nameof(transform));
-                    }
-
-                    var result = BsonExpressionMethods.EXTEND(doc, value.AsDocument).AsDocument;
-
-                    // be sure result document will contain same _id as current doc
-                    if (result.TryGetValue("_id", out var newId))
-                    {
-                        if (newId != id)
-                        {
-                            throw LiteException.InvalidUpdateField("_id");
-                        }
-                    }
-                    else
-                    {
-                        result["_id"] = id;
-                    }
-
-                    yield return result;
-                }
-            }
+            toUpdate.Add(result);
         }
+
+        return await Update(collection, toUpdate, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

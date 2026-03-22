@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -8,7 +10,7 @@ public partial class LiteEngine
     /// <summary>
     /// Create a new index (or do nothing if already exists) to a collection/field
     /// </summary>
-    public bool EnsureIndex(string collection, string name, BsonExpression expression, bool unique)
+    public ValueTask<bool> EnsureIndex(string collection, string name, BsonExpression expression, bool unique, CancellationToken cancellationToken = default)
     {
         if (collection.IsNullOrWhiteSpace())
         {
@@ -51,13 +53,11 @@ public partial class LiteEngine
         }
 
         if (expression.Source == "$._id")
-        {
-            return false; // always exists
-        }
+            return new ValueTask<bool>(false); // always exists
 
-        return AutoTransaction(transaction =>
+        return AutoTransactionAsync(async (transaction, ct) =>
         {
-            var snapshot = transaction.CreateSnapshot(LockMode.Write, collection, true);
+            var snapshot = await transaction.CreateSnapshotAsync(LockMode.Write, collection, true, ct).ConfigureAwait(false);
             var collectionPage = snapshot.CollectionPage;
             var indexer = new IndexService(snapshot, _header.Pragmas.Collation, _disk.MAX_ITEMS_COUNT);
             var data = new DataService(snapshot, _disk.MAX_ITEMS_COUNT);
@@ -127,13 +127,13 @@ public partial class LiteEngine
             }
 
             return true;
-        });
+        }, cancellationToken);
     }
 
     /// <summary>
     /// Drop an index from a collection
     /// </summary>
-    public bool DropIndex(string collection, string name)
+    public ValueTask<bool> DropIndex(string collection, string name, CancellationToken cancellationToken = default)
     {
         if (collection.IsNullOrWhiteSpace())
         {
@@ -150,9 +150,9 @@ public partial class LiteEngine
             throw LiteException.IndexDropId();
         }
 
-        return AutoTransaction(transaction =>
+        return AutoTransactionAsync(async (transaction, ct) =>
         {
-            var snapshot = transaction.CreateSnapshot(LockMode.Write, collection, false);
+            var snapshot = await transaction.CreateSnapshotAsync(LockMode.Write, collection, false, ct).ConfigureAwait(false);
             var col = snapshot.CollectionPage;
             var indexer = new IndexService(snapshot, _header.Pragmas.Collation, _disk.MAX_ITEMS_COUNT);
 
@@ -178,6 +178,6 @@ public partial class LiteEngine
             snapshot.CollectionPage.DeleteCollectionIndex(name);
 
             return true;
-        });
+        }, cancellationToken);
     }
 }

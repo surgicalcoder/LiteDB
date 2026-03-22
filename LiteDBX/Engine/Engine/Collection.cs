@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -10,22 +12,22 @@ public partial class LiteEngine
     /// <summary>
     /// Drop collection including all documents, indexes and extended pages (do not support transactions)
     /// </summary>
-    public bool DropCollection(string name)
+    public ValueTask<bool> DropCollection(string name, CancellationToken cancellationToken = default)
     {
         if (name.IsNullOrWhiteSpace())
         {
             throw new ArgumentNullException(nameof(name));
         }
 
-        // drop collection is possible only in exclusive transaction for this
-        if (_locker.IsInTransaction)
+        // DropCollection requires no active explicit transaction.
+        if (LiteTransaction.HasActive)
         {
             throw LiteException.AlreadyExistsTransaction();
         }
 
-        return AutoTransaction(transaction =>
+        return AutoTransactionAsync(async (transaction, ct) =>
         {
-            var snapshot = transaction.CreateSnapshot(LockMode.Write, name, false);
+            var snapshot = await transaction.CreateSnapshotAsync(LockMode.Write, name, false, ct).ConfigureAwait(false);
 
             // if collection do not exist, just exit
             if (snapshot.CollectionPage == null)
@@ -42,13 +44,13 @@ public partial class LiteEngine
             _sequences.TryRemove(name, out var dummy);
 
             return true;
-        });
+        }, cancellationToken);
     }
 
     /// <summary>
     /// Rename a collection (do not support transactions)
     /// </summary>
-    public bool RenameCollection(string collection, string newName)
+    public ValueTask<bool> RenameCollection(string collection, string newName, CancellationToken cancellationToken = default)
     {
         if (collection.IsNullOrWhiteSpace())
         {
@@ -60,8 +62,7 @@ public partial class LiteEngine
             throw new ArgumentNullException(nameof(newName));
         }
 
-        // rename collection is possible only in exclusive transaction for this
-        if (_locker.IsInTransaction)
+        if (LiteTransaction.HasActive)
         {
             throw LiteException.AlreadyExistsTransaction();
         }
@@ -75,16 +76,10 @@ public partial class LiteEngine
         // checks if newName are compatible
         CollectionService.CheckName(newName, _header);
 
-        // rename collection is possible only in exclusive transaction for this
-        if (_locker.IsInTransaction)
+        return AutoTransactionAsync(async (transaction, ct) =>
         {
-            throw LiteException.AlreadyExistsTransaction();
-        }
-
-        return AutoTransaction(transaction =>
-        {
-            var currentSnapshot = transaction.CreateSnapshot(LockMode.Write, collection, false);
-            var newSnapshot = transaction.CreateSnapshot(LockMode.Write, newName, false);
+            var currentSnapshot = await transaction.CreateSnapshotAsync(LockMode.Write, collection, false, ct).ConfigureAwait(false);
+            var newSnapshot = await transaction.CreateSnapshotAsync(LockMode.Write, newName, false, ct).ConfigureAwait(false);
 
             if (currentSnapshot.CollectionPage == null)
             {
@@ -101,7 +96,7 @@ public partial class LiteEngine
             transaction.Pages.Commit += h => { h.RenameCollection(collection, newName); };
 
             return true;
-        });
+        }, cancellationToken);
     }
 
     /// <summary>

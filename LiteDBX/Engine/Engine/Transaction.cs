@@ -1,98 +1,56 @@
 ﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
 
 public partial class LiteEngine
 {
+    // ── ILiteEngine — explicit transaction ────────────────────────────────────
+
     /// <summary>
-    /// Initialize a new transaction. Transaction are created "per-thread". There is only one single transaction per thread.
-    /// Return true if transaction was created or false if current thread already in a transaction.
+    /// Begin an explicit async transaction scope.
+    /// The returned <see cref="LiteTransaction"/> sets the ambient context via <see cref="AsyncLocal{T}"/>
+    /// so that all engine operations within the same logical async flow automatically participate.
+    /// Disposing without committing triggers an implicit rollback.
     /// </summary>
-    public bool BeginTrans()
+    public async ValueTask<ILiteTransaction> BeginTransaction(CancellationToken cancellationToken = default)
     {
         _state.Validate();
 
-        var transacion = _monitor.GetTransaction(true, false, out var isNew);
-
-        transacion.ExplicitTransaction = true;
-
-        if (transacion.OpenCursors.Count > 0)
+        if (LiteTransaction.HasActive)
         {
-            throw new LiteException(0, "This thread contains an open cursors/query. Close cursors before Begin()");
+            throw new LiteException(0, "An explicit transaction is already active in this async context. " +
+                "Nested explicit transactions are not supported. Use the existing transaction or complete it first.");
         }
 
-        LOG(isNew, "begin trans", "COMMAND");
-
-        return isNew;
+        var service = await _monitor.CreateExplicitTransactionAsync(cancellationToken).ConfigureAwait(false);
+        return new LiteTransaction(service, _monitor);
     }
 
+    // ── Internal async transaction helpers ───────────────────────────────────
+
     /// <summary>
-    /// Persist all dirty pages into LOG file
+    /// Execute <paramref name="fn"/> within an auto-transaction.
+    /// If an explicit ambient transaction is active it is reused (no commit/release on exit).
+    /// If a new auto-transaction is created it is committed and released after <paramref name="fn"/> returns.
     /// </summary>
-    public bool Commit()
+    private async ValueTask<T> AutoTransactionAsync<T>(
+        Func<TransactionService, CancellationToken, ValueTask<T>> fn,
+        CancellationToken ct = default)
     {
         _state.Validate();
 
-        var transaction = _monitor.GetTransaction(false, false, out _);
-
-        if (transaction != null)
-        {
-            // do not accept explicit commit transaction when contains open cursors running
-            if (transaction.OpenCursors.Count > 0)
-            {
-                throw new LiteException(0, "Current transaction contains open cursors. Close cursors before run Commit()");
-            }
-
-            if (transaction.State == TransactionState.Active)
-            {
-                CommitAndReleaseTransaction(transaction);
-
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Do rollback to current transaction. Clear dirty pages in memory and return new pages to main empty linked-list
-    /// </summary>
-    public bool Rollback()
-    {
-        _state.Validate();
-
-        var transaction = _monitor.GetTransaction(false, false, out _);
-
-        if (transaction != null && transaction.State == TransactionState.Active)
-        {
-            transaction.Rollback();
-
-            _monitor.ReleaseTransaction(transaction);
-
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Create (or reuse) a transaction an add try/catch block. Commit transaction if is new transaction
-    /// </summary>
-    private T AutoTransaction<T>(Func<TransactionService, T> fn)
-    {
-        _state.Validate();
-
-        var transaction = _monitor.GetTransaction(true, false, out var isNew);
+        var (transaction, isNew) = await _monitor.GetOrCreateTransactionAsync(false, ct).ConfigureAwait(false);
 
         try
         {
-            var result = fn(transaction);
+            var result = await fn(transaction, ct).ConfigureAwait(false);
 
-            // if this transaction was auto-created for this operation, commit & dispose now
             if (isNew)
             {
-                CommitAndReleaseTransaction(transaction);
+                await CommitAndReleaseTransactionAsync(transaction, ct).ConfigureAwait(false);
             }
 
             return result;
@@ -102,7 +60,6 @@ public partial class LiteEngine
             if (_state.Handle(ex))
             {
                 transaction.Rollback();
-
                 _monitor.ReleaseTransaction(transaction);
             }
 
@@ -110,16 +67,17 @@ public partial class LiteEngine
         }
     }
 
-    private void CommitAndReleaseTransaction(TransactionService transaction)
+    private async ValueTask CommitAndReleaseTransactionAsync(TransactionService transaction, CancellationToken ct = default)
     {
         transaction.Commit();
 
         _monitor.ReleaseTransaction(transaction);
 
-        // try checkpoint when finish transaction and log file are bigger than checkpoint pragma value (in pages)
+        // auto-checkpoint after commit if WAL exceeds the configured threshold
         if (_header.Pragmas.Checkpoint > 0 &&
             _disk.GetFileLength(FileOrigin.Log) > _header.Pragmas.Checkpoint * PAGE_SIZE)
         {
+            // Phase 3 bridge: TryCheckpoint is still sync internally.
             _walIndex.TryCheckpoint();
         }
     }

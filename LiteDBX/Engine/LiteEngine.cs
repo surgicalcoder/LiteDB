@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using LiteDbX.Utils;
 using static LiteDbX.Constants;
 
@@ -13,15 +15,34 @@ namespace LiteDbX.Engine;
 /// Its isolated from complete solution - works on low level only (no linq, no poco... just BSON objects)
 /// [ThreadSafe]
 /// </summary>
-public partial class LiteEngine : ILiteEngine
+public partial class LiteEngine : ILiteEngine, IDisposable
 {
     /// <summary>
-    /// Run checkpoint command to copy log file into data file
+    /// Run checkpoint command to copy log file into data file.
+    ///
+    /// Phase 2: signature updated to match <see cref="ILiteEngine.Checkpoint"/>.
+    /// Phase 3 bridge: WAL checkpoint is still synchronous internally; returns a completed <see cref="ValueTask{T}"/>.
+    /// Phase 3 (Disk and Streams) will make this truly async.
     /// </summary>
-    public int Checkpoint()
+    public ValueTask<int> Checkpoint(CancellationToken cancellationToken = default)
     {
-        return _walIndex.Checkpoint();
+        return new ValueTask<int>(_walIndex.Checkpoint());
     }
+
+    // ── IAsyncDisposable ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Async dispose — satisfies <see cref="ILiteEngine"/> / <see cref="IAsyncDisposable"/> contract.
+    /// Phase 3 bridge: <see cref="Close()"/> is still synchronous; returns a completed <see cref="ValueTask"/>.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+        return default;
+    }
+
+    // ── IDisposable (retained as a sync convenience for internal callers) ──────
 
     public void Dispose()
     {

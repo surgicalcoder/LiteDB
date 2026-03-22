@@ -65,7 +65,8 @@ internal class QueryExecutor
     internal BsonDataReader ExecuteQuery(bool executionPlan)
     {
         // get current transaction (if contains a explicit transaction) or a query-only transaction
-        var transaction = _monitor.GetTransaction(true, true, out var isNew);
+        // Phase 4 bridge: uses synchronous GetOrCreateTransactionSync until QueryExecutor is fully async.
+        var transaction = _monitor.GetOrCreateTransactionSync(true, out var isNew);
 
         transaction.OpenCursors.Add(_cursor);
 
@@ -176,7 +177,8 @@ internal class QueryExecutor
         {
             using (var reader = ExecuteQuery(false))
             {
-                while (reader.Read())
+                // Phase 4 bridge: uses synchronous ReadSync until QueryExecutor is fully async.
+                while (reader.ReadSync())
                 {
                     yield return reader.Current.AsDocument;
                 }

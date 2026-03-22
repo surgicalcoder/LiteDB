@@ -4,6 +4,11 @@ using static LiteDbX.Constants;
 namespace LiteDbX.Engine;
 
 /// <summary>
+/// Rebuilds a LiteDB database by reading from the existing file and writing a fresh copy.
+///
+/// Phase 3 bridge: all engine method calls here use <c>.GetAwaiter().GetResult()</c> because
+/// <see cref="Rebuild"/> runs synchronously on a dedicated non-async path. Phase 3 (Disk and
+/// Streams) will convert this whole flow to async.
 /// [ThreadSafe]
 /// </summary>
 internal class RebuildService
@@ -44,7 +49,7 @@ internal class RebuildService
             // open file reader and ready to import to new temp engine instance
             reader.Open();
 
-            // open new engine to recive all data readed from FileReader
+            // open new engine to receive all data read from FileReader
             using (var engine = new LiteEngine(new EngineSettings
                    {
                        Filename = tempFilename,
@@ -53,7 +58,8 @@ internal class RebuildService
                    }))
             {
                 // copy all database to new Log file with NO checkpoint during all rebuild
-                engine.Pragma(Pragmas.CHECKPOINT, 0);
+                // Phase 3 bridge: .GetAwaiter().GetResult() — Pragma is now async (ValueTask<bool>).
+                engine.Pragma(Pragmas.CHECKPOINT, 0).GetAwaiter().GetResult();
 
                 // rebuild all content from reader into new engine
                 engine.RebuildContent(reader);
@@ -63,20 +69,22 @@ internal class RebuildService
                 {
                     var report = options.GetErrorReport();
 
-                    engine.Insert("_rebuild_errors", report, BsonAutoId.Int32);
+                    // Phase 3 bridge: .GetAwaiter().GetResult() — Insert is now async (ValueTask<int>).
+                    engine.Insert("_rebuild_errors", report, BsonAutoId.Int32).GetAwaiter().GetResult();
                 }
 
-                // update pragmas
+                // update pragmas — Phase 3 bridge: .GetAwaiter().GetResult() on each async Pragma call
                 var pragmas = reader.GetPragmas();
 
-                engine.Pragma(Pragmas.CHECKPOINT, pragmas[Pragmas.CHECKPOINT]);
-                engine.Pragma(Pragmas.TIMEOUT, pragmas[Pragmas.TIMEOUT]);
-                engine.Pragma(Pragmas.LIMIT_SIZE, pragmas[Pragmas.LIMIT_SIZE]);
-                engine.Pragma(Pragmas.UTC_DATE, pragmas[Pragmas.UTC_DATE]);
-                engine.Pragma(Pragmas.USER_VERSION, pragmas[Pragmas.USER_VERSION]);
+                engine.Pragma(Pragmas.CHECKPOINT, pragmas[Pragmas.CHECKPOINT]).GetAwaiter().GetResult();
+                engine.Pragma(Pragmas.TIMEOUT, pragmas[Pragmas.TIMEOUT]).GetAwaiter().GetResult();
+                engine.Pragma(Pragmas.LIMIT_SIZE, pragmas[Pragmas.LIMIT_SIZE]).GetAwaiter().GetResult();
+                engine.Pragma(Pragmas.UTC_DATE, pragmas[Pragmas.UTC_DATE]).GetAwaiter().GetResult();
+                engine.Pragma(Pragmas.USER_VERSION, pragmas[Pragmas.USER_VERSION]).GetAwaiter().GetResult();
 
                 // after rebuild, copy log bytes into data file
-                engine.Checkpoint();
+                // Phase 3 bridge: .GetAwaiter().GetResult() — Checkpoint is now async (ValueTask<int>).
+                engine.Checkpoint().GetAwaiter().GetResult();
             }
         }
 
@@ -93,7 +101,6 @@ internal class RebuildService
 
         // rename temp file into filename
         File.Move(tempFilename, _settings.Filename);
-
 
         // get difference size
         return
@@ -118,3 +125,4 @@ internal class RebuildService
         return buffer;
     }
 }
+
