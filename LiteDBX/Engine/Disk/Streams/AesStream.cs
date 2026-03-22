@@ -3,12 +3,26 @@ using System.Buffers;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
 
 /// <summary>
 /// Encrypted AES Stream
+///
+/// Phase 3: <see cref="ReadAsync(byte[],int,int,CancellationToken)"/> and
+/// <see cref="WriteAsync(byte[],int,int,CancellationToken)"/> now delegate to the underlying
+/// <see cref="CryptoStream"/> async paths rather than silently falling back to the inherited
+/// synchronous default.  The underlying <see cref="FileStream"/> must be opened with
+/// <c>FileOptions.Asynchronous</c> (guaranteed by <see cref="FileStreamFactory"/>) for these
+/// calls to issue genuine OS-level async I/O.
+///
+/// Durability note: <c>CryptoStream.FlushAsync</c> flushes the crypto buffer to the underlying
+/// stream; physical-disk durability requires the underlying <c>FileStream.Flush(true)</c> which is
+/// still synchronous.  This is acceptable on shutdown/checkpoint paths but must not be called
+/// on hot async write paths without careful consideration.
 /// </summary>
 public class AesStream : Stream
 {
@@ -193,6 +207,38 @@ public class AesStream : Stream
         ENSURE(Position == HeaderPage.P_INVALID_DATAFILE_STATE || Position % PAGE_SIZE == 0, "AesWrite: position must be in PAGE_SIZE module. Position={0}, File={1}", Position, _name);
 
         _writer.Write(array, offset, count);
+    }
+
+    /// <summary>
+    /// Async decrypt data from Stream.
+    /// Delegates to <see cref="CryptoStream.ReadAsync"/> which on .NET Core 2.1+ issues genuine
+    /// async I/O through the underlying stream.
+    /// </summary>
+    public override async Task<int> ReadAsync(byte[] array, int offset, int count, CancellationToken cancellationToken)
+    {
+        ENSURE(Position % PAGE_SIZE == 0, "AesRead: position must be in PAGE_SIZE module. Position={0}, File={1}", Position, _name);
+
+        var r = await _reader.ReadAsync(array, offset, count, cancellationToken).ConfigureAwait(false);
+
+        if (IsBlank(array, offset))
+        {
+            array.Fill(0, offset, count);
+        }
+
+        return r;
+    }
+
+    /// <summary>
+    /// Async encrypt data to Stream.
+    /// Delegates to <see cref="CryptoStream.WriteAsync"/> which on .NET Core 2.1+ issues genuine
+    /// async I/O through the underlying stream.
+    /// </summary>
+    public override Task WriteAsync(byte[] array, int offset, int count, CancellationToken cancellationToken)
+    {
+        ENSURE(count == PAGE_SIZE || count == 1, "buffer size must be PAGE_SIZE");
+        ENSURE(Position == HeaderPage.P_INVALID_DATAFILE_STATE || Position % PAGE_SIZE == 0, "AesWrite: position must be in PAGE_SIZE module. Position={0}, File={1}", Position, _name);
+
+        return _writer.WriteAsync(array, offset, count, cancellationToken);
     }
 
     protected override void Dispose(bool disposing)

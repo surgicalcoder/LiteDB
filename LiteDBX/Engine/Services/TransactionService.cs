@@ -197,92 +197,56 @@ internal class TransactionService : IDisposable
     }
 
     /// <summary>
-    /// Persist all dirty in-memory pages (in all snapshots) and clear local pages list (even clean pages)
+    /// Phase 4 bridge: synchronous version of <see cref="PersistDirtyPagesAsync"/> for
+    /// <see cref="Safepoint"/> and the sync <see cref="Commit"/> bridge.
+    /// Uses <see cref="DiskService.WriteLogDiskSync"/>.
     /// </summary>
     private int PersistDirtyPages(bool commit)
     {
-        var dirty = 0;
-
-        // inner method to get all dirty pages
         IEnumerable<PageBuffer> source()
         {
-            // get all dirty pages from all write snapshots
-            // can include (or not) collection pages
-            // update DirtyPagesLog inside transPage for all dirty pages was write on disk
             var pages = _snapshots.Values
                                   .Where(x => x.Mode == LockMode.Write)
                                   .SelectMany(x => x.GetWritablePages(true, commit));
 
-            // mark last dirty page as confirmed only if there is no header change in commit
             var markLastAsConfirmed = commit && !Pages.HeaderChanged;
 
-            // neet use "IsLast" method to get when loop are last item
             foreach (var page in pages.IsLast())
             {
-                // update page transactionID
                 page.Item.TransactionID = TransactionID;
 
-                // if last page, mask as confirm (only if a real commit and no header changes)
                 if (page.IsLast)
-                {
                     page.Item.IsConfirmed = markLastAsConfirmed;
-                }
 
-                // if current page is last deleted page, point this page to last free
                 if (Pages.LastDeletedPageID == page.Item.PageID && commit)
                 {
                     ENSURE(Pages.HeaderChanged, "must header be in lock");
                     ENSURE(page.Item.PageType == PageType.Empty, "must be marked as deleted page");
-
-                    // join existing free list pages into new list of deleted pages
                     page.Item.NextPageID = _header.FreeEmptyPageList;
-
-                    // and now, set header free list page to this new list
                     _header.FreeEmptyPageList = Pages.FirstDeletedPageID;
                 }
 
                 var buffer = page.Item.UpdateBuffer();
-
-                // buffer position will be set at end of file (it´s always log file)
                 yield return buffer;
-
-                dirty++;
 
                 Pages.DirtyPages[page.Item.PageID] = new PagePosition(page.Item.PageID, buffer.Position);
             }
 
-            // in commit with header page change, last page will be header
             if (commit && Pages.HeaderChanged)
             {
-                // update this confirm page with current transactionID
                 _header.TransactionID = TransactionID;
-
-                // this header page will be marked as confirmed page in log file
                 _header.IsConfirmed = true;
-
-                // invoke all header callbacks (new/drop collections)
                 Pages.OnCommit(_header);
 
-                // clone header page
                 var buffer = _header.UpdateBuffer();
                 var clone = _disk.NewPage();
-
-                // mem copy from current header to new header clone
                 Buffer.BlockCopy(buffer.Array, buffer.Offset, clone.Array, clone.Offset, clone.Count);
-
-                // persist header in log file
                 yield return clone;
             }
         }
 
-        ;
+        var count = _disk.WriteLogDiskSync(source());
 
-        // write all dirty pages, in sequence on log-file and store references into log pages on transPages
-        // (works only for Write snapshots)
-        var count = _disk.WriteLogDisk(source());
-
-        // now, discard all clean pages (because those pages are writable and must be readable)
-        // from write snapshots
         _disk.DiscardCleanPages(_snapshots.Values
                                           .Where(x => x.Mode == LockMode.Write)
                                           .SelectMany(x => x.GetWritablePages(false, commit))
@@ -292,8 +256,107 @@ internal class TransactionService : IDisposable
     }
 
     /// <summary>
-    /// Write pages into disk and confirm transaction in wal-index. Returns true if any dirty page was updated
-    /// After commit, all snapshot are closed
+    /// Persist all dirty in-memory pages (in all snapshots) and confirm them in the WAL.
+    /// Returns the number of pages written.
+    ///
+    /// Phase 3: uses <see cref="DiskService.WriteLogDisk"/> (async) and
+    /// <see cref="WalIndexService.ConfirmTransactionAsync"/>.
+    /// The caller must hold <see cref="TransactionMonitor.HeaderCommitGate"/> before calling this
+    /// method to serialise concurrent commits that modify the header page.
+    /// </summary>
+    private async ValueTask<int> PersistDirtyPagesAsync(bool commit, CancellationToken ct)
+    {
+
+        IEnumerable<PageBuffer> source()
+        {
+            var pages = _snapshots.Values
+                                  .Where(x => x.Mode == LockMode.Write)
+                                  .SelectMany(x => x.GetWritablePages(true, commit));
+
+            var markLastAsConfirmed = commit && !Pages.HeaderChanged;
+
+            foreach (var page in pages.IsLast())
+            {
+                page.Item.TransactionID = TransactionID;
+
+                if (page.IsLast)
+                    page.Item.IsConfirmed = markLastAsConfirmed;
+
+                if (Pages.LastDeletedPageID == page.Item.PageID && commit)
+                {
+                    ENSURE(Pages.HeaderChanged, "must header be in lock");
+                    ENSURE(page.Item.PageType == PageType.Empty, "must be marked as deleted page");
+                    page.Item.NextPageID = _header.FreeEmptyPageList;
+                    _header.FreeEmptyPageList = Pages.FirstDeletedPageID;
+                }
+
+                var buffer = page.Item.UpdateBuffer();
+                yield return buffer;
+
+                Pages.DirtyPages[page.Item.PageID] = new PagePosition(page.Item.PageID, buffer.Position);
+            }
+
+            if (commit && Pages.HeaderChanged)
+            {
+                _header.TransactionID = TransactionID;
+                _header.IsConfirmed = true;
+                Pages.OnCommit(_header);
+
+                var buffer = _header.UpdateBuffer();
+                var clone = _disk.NewPage();
+                Buffer.BlockCopy(buffer.Array, buffer.Offset, clone.Array, clone.Offset, clone.Count);
+                yield return clone;
+            }
+        }
+
+        var count = await _disk.WriteLogDisk(source(), ct).ConfigureAwait(false);
+
+        _disk.DiscardCleanPages(_snapshots.Values
+                                          .Where(x => x.Mode == LockMode.Write)
+                                          .SelectMany(x => x.GetWritablePages(false, commit))
+                                          .Select(x => x.Buffer));
+
+        return count;
+    }
+
+    /// <summary>
+    /// Asynchronously commit the transaction: persist dirty pages, confirm in WAL, dispose snapshots.
+    ///
+    /// Phase 3: replaces <c>lock(_header)</c> with <see cref="TransactionMonitor.HeaderCommitGate"/>
+    /// so the commit path never blocks a thread-pool thread.
+    /// </summary>
+    public async ValueTask CommitAsync(CancellationToken ct = default)
+    {
+        ENSURE(State == TransactionState.Active, "transaction must be active to commit (current state: {0})", State);
+
+        LOG($"commit transaction ({Pages.TransactionSize} pages)", "TRANSACTION");
+
+        if (Mode == LockMode.Write || Pages.HeaderChanged)
+        {
+            await _monitor.HeaderCommitGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var count = await PersistDirtyPagesAsync(true, ct).ConfigureAwait(false);
+
+                if (count > 0)
+                    await _walIndex.ConfirmTransactionAsync(TransactionID, Pages.DirtyPages.Values, ct)
+                                   .ConfigureAwait(false);
+            }
+            finally
+            {
+                _monitor.HeaderCommitGate.Release();
+            }
+        }
+
+        foreach (var snapshot in _snapshots.Values)
+            snapshot.Dispose();
+
+        State = TransactionState.Committed;
+    }
+
+    /// <summary>
+    /// Phase 4 bridge: synchronous commit for code paths not yet converted.
+    /// Prefer <see cref="CommitAsync"/> from all async callers.
     /// </summary>
     public void Commit()
     {
@@ -303,58 +366,47 @@ internal class TransactionService : IDisposable
 
         if (Mode == LockMode.Write || Pages.HeaderChanged)
         {
-            lock (_header)
+            _monitor.HeaderCommitGate.Wait();
+            try
             {
-                // persist all dirty page as commit mode (mark last page as IsConfirm)
                 var count = PersistDirtyPages(true);
-
-                // update wal-index (if any page was added into log disk)
                 if (count > 0)
-                {
                     _walIndex.ConfirmTransaction(TransactionID, Pages.DirtyPages.Values);
-                }
+            }
+            finally
+            {
+                _monitor.HeaderCommitGate.Release();
             }
         }
 
-        // dispose all snapshots
         foreach (var snapshot in _snapshots.Values)
-        {
             snapshot.Dispose();
-        }
 
         State = TransactionState.Committed;
     }
 
     /// <summary>
-    /// Rollback transaction operation - ignore all modified pages and return new pages into disk
-    /// After rollback, all snapshot are closed
+    /// Asynchronously rollback the transaction: discard dirty pages, return new pages, dispose snapshots.
+    ///
+    /// Phase 3: <see cref="ReturnNewPagesAsync"/> uses the async WAL write path.
     /// </summary>
-    public void Rollback()
+    public async ValueTask RollbackAsync(CancellationToken ct = default)
     {
         ENSURE(State == TransactionState.Active, "transaction must be active to rollback (current state: {0})", State);
 
         LOG($"rollback transaction ({Pages.TransactionSize} pages with {Pages.NewPages.Count} returns)", "TRANSACTION");
 
-        // if transaction contains new pages, must return to database in another transaction
         if (Pages.NewPages.Count > 0)
-        {
-            ReturnNewPages();
-        }
+            await ReturnNewPagesAsync(ct).ConfigureAwait(false);
 
-        // dispose all snapshots
         foreach (var snapshot in _snapshots.Values)
         {
-            // but first, if writable, discard changes
             if (snapshot.Mode == LockMode.Write)
             {
-                // discard all dirty pages
                 _disk.DiscardDirtyPages(snapshot.GetWritablePages(true, true).Select(x => x.Buffer));
-
-                // discard all clean pages
                 _disk.DiscardCleanPages(snapshot.GetWritablePages(false, true).Select(x => x.Buffer));
             }
 
-            // now, release pages
             snapshot.Dispose();
         }
 
@@ -362,31 +414,53 @@ internal class TransactionService : IDisposable
     }
 
     /// <summary>
-    /// Return added pages when occurs an rollback transaction (run this only in rollback). Create new transactionID and add
-    /// into
-    /// Log file all new pages as EmptyPage in a linked order - also, update SharedPage before store
+    /// Phase 4 bridge: synchronous rollback for paths not yet converted.
+    /// Prefer <see cref="RollbackAsync"/> from all async callers.
     /// </summary>
-    private void ReturnNewPages()
+    public void Rollback()
     {
-        // create new transaction ID
+        ENSURE(State == TransactionState.Active, "transaction must be active to rollback (current state: {0})", State);
+
+        LOG($"rollback transaction ({Pages.TransactionSize} pages with {Pages.NewPages.Count} returns)", "TRANSACTION");
+
+        if (Pages.NewPages.Count > 0)
+            ReturnNewPages();
+
+        foreach (var snapshot in _snapshots.Values)
+        {
+            if (snapshot.Mode == LockMode.Write)
+            {
+                _disk.DiscardDirtyPages(snapshot.GetWritablePages(true, true).Select(x => x.Buffer));
+                _disk.DiscardCleanPages(snapshot.GetWritablePages(false, true).Select(x => x.Buffer));
+            }
+
+            snapshot.Dispose();
+        }
+
+        State = TransactionState.Aborted;
+    }
+
+    /// <summary>
+    /// Async: return added pages on rollback by writing them as EmptyPage entries in the log.
+    /// Phase 3 primary path.
+    /// </summary>
+    private async ValueTask ReturnNewPagesAsync(CancellationToken ct)
+    {
         var transactionID = _walIndex.NextTransactionID();
 
-        // now lock header to update LastTransactionID/FreePageList
-        lock (_header)
+        await _monitor.HeaderCommitGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            // persist all empty pages into wal-file
             var pagePositions = new Dictionary<uint, PagePosition>();
 
             IEnumerable<PageBuffer> source()
             {
-                // create list of empty pages with forward link pointer
                 for (var i = 0; i < Pages.NewPages.Count; i++)
                 {
                     var pageID = Pages.NewPages[i];
                     var next = i < Pages.NewPages.Count - 1 ? Pages.NewPages[i + 1] : _header.FreeEmptyPageList;
 
                     var buffer = _disk.NewPage();
-
                     var page = new BasePage(buffer, pageID, PageType.Empty)
                     {
                         NextPageID = next,
@@ -394,45 +468,95 @@ internal class TransactionService : IDisposable
                     };
 
                     yield return page.UpdateBuffer();
-
-                    // update wal
                     pagePositions[pageID] = new PagePosition(pageID, buffer.Position);
                 }
 
-                // update header page with my new transaction ID
                 _header.TransactionID = transactionID;
                 _header.FreeEmptyPageList = Pages.NewPages[0];
                 _header.IsConfirmed = true;
 
-                // clone header buffer
                 var buf = _header.UpdateBuffer();
                 var clone = _disk.NewPage();
-
                 Buffer.BlockCopy(buf.Array, buf.Offset, clone.Array, clone.Offset, clone.Count);
-
                 yield return clone;
             }
 
-            ;
-
-            // create a header save point before any change
             var safepoint = _header.Savepoint();
-
             try
             {
-                // write all pages (including new header)
-                _disk.WriteLogDisk(source());
+                await _disk.WriteLogDisk(source(), ct).ConfigureAwait(false);
             }
             catch
             {
-                // must revert all header content if any error occurs during header change
                 _header.Restore(safepoint);
-
                 throw;
             }
 
-            // now confirm this transaction to wal
+            await _walIndex.ConfirmTransactionAsync(transactionID, pagePositions.Values, ct)
+                           .ConfigureAwait(false);
+        }
+        finally
+        {
+            _monitor.HeaderCommitGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Phase 4 bridge: synchronous return-new-pages for paths not yet converted.
+    /// </summary>
+    private void ReturnNewPages()
+    {
+        var transactionID = _walIndex.NextTransactionID();
+
+        _monitor.HeaderCommitGate.Wait();
+        try
+        {
+            var pagePositions = new Dictionary<uint, PagePosition>();
+
+            IEnumerable<PageBuffer> source()
+            {
+                for (var i = 0; i < Pages.NewPages.Count; i++)
+                {
+                    var pageID = Pages.NewPages[i];
+                    var next = i < Pages.NewPages.Count - 1 ? Pages.NewPages[i + 1] : _header.FreeEmptyPageList;
+
+                    var buffer = _disk.NewPage();
+                    var page = new BasePage(buffer, pageID, PageType.Empty)
+                    {
+                        NextPageID = next,
+                        TransactionID = transactionID
+                    };
+
+                    yield return page.UpdateBuffer();
+                    pagePositions[pageID] = new PagePosition(pageID, buffer.Position);
+                }
+
+                _header.TransactionID = transactionID;
+                _header.FreeEmptyPageList = Pages.NewPages[0];
+                _header.IsConfirmed = true;
+
+                var buf = _header.UpdateBuffer();
+                var clone = _disk.NewPage();
+                Buffer.BlockCopy(buf.Array, buf.Offset, clone.Array, clone.Offset, clone.Count);
+                yield return clone;
+            }
+
+            var safepoint = _header.Savepoint();
+            try
+            {
+                _disk.WriteLogDiskSync(source());
+            }
+            catch
+            {
+                _header.Restore(safepoint);
+                throw;
+            }
+
             _walIndex.ConfirmTransaction(transactionID, pagePositions.Values);
+        }
+        finally
+        {
+            _monitor.HeaderCommitGate.Release();
         }
     }
 

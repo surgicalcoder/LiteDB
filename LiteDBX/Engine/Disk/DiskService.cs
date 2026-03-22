@@ -2,26 +2,45 @@
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
 
 /// <summary>
-/// Implement custom fast/in memory mapped disk access
+/// Implement custom fast/in memory mapped disk access.
 /// [ThreadSafe]
+///
+/// Phase 3 changes:
+/// <list type="bullet">
+///   <item><see cref="WriteLogDisk"/> is now async; <c>lock(stream)</c> replaced with
+///     <see cref="SemaphoreSlim"/> so the caller is never blocked on a thread.</item>
+///   <item><see cref="WriteDataDisk"/> is now async using <see cref="Stream.WriteAsync"/>
+///     and <see cref="StreamExtensions.FlushToDiskAsync"/>.</item>
+///   <item><see cref="ReadFullAsync"/> added as the async enumeration path for operational
+///     runtime reads (checkpoint, restore-index bootstrap path kept sync via <see cref="ReadFull"/>).</item>
+///   <item><see cref="MarkAsInvalidStateAsync"/> replaces the sync version for the error-close path.</item>
+///   <item>Implements <see cref="IAsyncDisposable"/> for the engine async-close lifecycle.</item>
+/// </list>
 /// </summary>
-internal class DiskService : IDisposable
+internal class DiskService : IDisposable, IAsyncDisposable
 {
     private static readonly ArrayPool<byte> _bufferPool = ArrayPool<byte>.Shared;
 
     private readonly IStreamFactory _dataFactory;
-
     private readonly StreamPool _dataPool;
     private readonly IStreamFactory _logFactory;
     private readonly StreamPool _logPool;
     private readonly EngineState _state;
     private readonly Lazy<Stream> _writer;
+
+    /// <summary>
+    /// Serialises all concurrent WAL writes so that page positions are assigned atomically and
+    /// written in order.  Replaces the former <c>lock(stream)</c> block.
+    /// </summary>
+    private readonly SemaphoreSlim _writerGate = new SemaphoreSlim(1, 1);
 
     private long _dataLength;
     private long _logLength;
@@ -34,38 +53,29 @@ internal class DiskService : IDisposable
         Cache = new MemoryCache(memorySegmentSizes);
         _state = state;
 
-
-        // get new stream factory based on settings
         _dataFactory = settings.CreateDataFactory();
         _logFactory = settings.CreateLogFactory();
 
-        // create stream pool
         _dataPool = new StreamPool(_dataFactory, false);
         _logPool = new StreamPool(_logFactory, true);
 
-        // get lazy disk writer (log file) - created only when used
         _writer = _logPool.Writer;
 
         var isNew = _dataFactory.GetLength() == 0L;
 
-        // create new database if not exist yet
         if (isNew)
         {
             LOG($"creating new database: '{Path.GetFileName(_dataFactory.Name)}'", "DISK");
-
             Initialize(_dataPool.Writer.Value, settings.Collation, settings.InitialSize);
         }
 
-        // if not readonly, force open writable datafile
         if (!settings.ReadOnly)
         {
             _ = _dataPool.Writer.Value.CanRead;
         }
 
-        // get initial data file length
         _dataLength = _dataFactory.GetLength() - PAGE_SIZE;
 
-        // get initial log file length (should be 1 page before)
         if (_logFactory.Exists())
         {
             _logLength = _logFactory.GetLength() - PAGE_SIZE;
@@ -76,49 +86,59 @@ internal class DiskService : IDisposable
         }
     }
 
-    /// <summary>
-    /// Get memory cache instance
-    /// </summary>
+    /// <summary>Get memory cache instance</summary>
     public MemoryCache Cache { get; }
 
     /// <summary>
-    /// This method calculates the maximum number of items (documents or IndexNodes) that this database can have.
-    /// The result is used to prevent infinite loops in case of problems with pointers
-    /// Each page support max of 255 items. Use 10 pages offset (avoid empty disk)
+    /// Maximum number of items (documents or IndexNodes) this database can have.
+    /// Used to prevent infinite loops in case of pointer problems.
     /// </summary>
     public uint MAX_ITEMS_COUNT => (uint)((_dataLength + _logLength) / PAGE_SIZE + 10) * byte.MaxValue;
 
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
     public void Dispose()
     {
-        // get stream length from writer - is safe because only this instance
-        // can change file size
         var delete = _logFactory.Exists() && _logPool.Writer.Value.Length == 0;
 
-        // dispose Stream pools
         _dataPool.Dispose();
         _logPool.Dispose();
 
         if (delete)
-        {
             _logFactory.Delete();
-        }
 
-        // other disposes
+        _writerGate.Dispose();
         Cache.Dispose();
     }
 
     /// <summary>
-    /// Create a new empty database (use synced mode)
+    /// Async dispose — preferred on the engine shutdown path.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        var delete = _logFactory.Exists() && _logPool.Writer.Value.Length == 0;
+
+        await _dataPool.DisposeAsync().ConfigureAwait(false);
+        await _logPool.DisposeAsync().ConfigureAwait(false);
+
+        if (delete)
+            _logFactory.Delete();
+
+        _writerGate.Dispose();
+        Cache.Dispose();
+    }
+
+    // ── Initialisation (startup-only, sync) ───────────────────────────────────
+
+    /// <summary>
+    /// Create a new empty database (synchronous; called only once on first open).
     /// </summary>
     private void Initialize(Stream stream, Collation collation, long initialSize)
     {
         var buffer = new PageBuffer(new byte[PAGE_SIZE], 0, 0);
         var header = new HeaderPage(buffer, 0);
 
-        // update collation
         header.Pragmas.Set(Pragmas.COLLATION, (collation ?? Collation.Default).ToString(), false);
-
-        // update buffer
         header.UpdateBuffer();
 
         stream.Write(buffer.Array, buffer.Offset, PAGE_SIZE);
@@ -126,14 +146,10 @@ internal class DiskService : IDisposable
         if (initialSize > 0)
         {
             if (stream is AesStream)
-            {
                 throw LiteException.InitialSizeCryptoNotSupported();
-            }
 
             if (initialSize % PAGE_SIZE != 0)
-            {
                 throw LiteException.InvalidInitialSize();
-            }
 
             stream.SetLength(initialSize);
         }
@@ -141,155 +157,172 @@ internal class DiskService : IDisposable
         stream.FlushToDisk();
     }
 
+    // ── Reader factory ────────────────────────────────────────────────────────
+
     /// <summary>
-    /// Get a new instance for read data/log pages. This instance are not thread-safe - must request 1 per thread (used in
-    /// Transaction)
+    /// Get a new instance for reading data/log pages.
+    /// The instance is NOT thread-safe — one per async execution context (transaction).
     /// </summary>
     public DiskReader GetReader()
     {
         return new DiskReader(_state, Cache, _dataPool, _logPool);
     }
 
-    /// <summary>
-    /// When a page are requested as Writable but not saved in disk, must be discard before release
-    /// </summary>
+    // ── Cache helpers (non-I/O) ───────────────────────────────────────────────
+
     public void DiscardDirtyPages(IEnumerable<PageBuffer> pages)
     {
-        // only for ROLLBACK action
         foreach (var page in pages)
-        {
-            // complete discard page and content
             Cache.DiscardPage(page);
-        }
     }
 
-    /// <summary>
-    /// Discard pages that contains valid data and was not modified
-    /// </summary>
     public void DiscardCleanPages(IEnumerable<PageBuffer> pages)
     {
         foreach (var page in pages)
         {
-            // if page was not modified, try move to readable list
             if (!Cache.TryMoveToReadable(page))
-            {
-                // if already in readable list, just discard
                 Cache.DiscardPage(page);
-            }
         }
     }
 
-    /// <summary>
-    /// Request for a empty, writable non-linked page.
-    /// </summary>
-    public PageBuffer NewPage()
-    {
-        return Cache.NewPage();
-    }
+    public PageBuffer NewPage() => Cache.NewPage();
+
+    // ── Async WAL write (Phase 3 primary path) ────────────────────────────────
 
     /// <summary>
-    /// Write all pages inside log file in a thread safe operation
+    /// Write all pages to the log file.
+    /// Uses a <see cref="SemaphoreSlim"/> rather than <c>lock</c> so the caller never blocks
+    /// a thread-pool thread while waiting for a concurrent write to finish.
     /// </summary>
-    public int WriteLogDisk(IEnumerable<PageBuffer> pages)
+    public async ValueTask<int> WriteLogDisk(IEnumerable<PageBuffer> pages,
+        CancellationToken cancellationToken = default)
     {
         var count = 0;
         var stream = _writer.Value;
 
-        // do a global write lock - only 1 thread can write on disk at time
-        lock (stream)
+        await _writerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             foreach (var page in pages)
             {
                 ENSURE(page.ShareCounter == BUFFER_WRITABLE, "to enqueue page, page must be writable");
 
-                // adding this page into file AS new page (at end of file)
-                // must add into cache to be sure that new readers can see this page
                 page.Position = Interlocked.Add(ref _logLength, PAGE_SIZE);
-
-                // should mark page origin to log because async queue works only for log file
-                // if this page came from data file, must be changed before MoveToReadable
                 page.Origin = FileOrigin.Log;
 
-                // mark this page as readable and get cached paged to enqueue
-                var readable = Cache.MoveToReadable(page);
+                Cache.MoveToReadable(page);
 
-                // set log stream position to page
                 stream.Position = page.Position;
 
 #if DEBUG
                 _state.SimulateDiskWriteFail?.Invoke(page);
 #endif
 
-                // and write to disk in a sync mode
-                stream.Write(page.Array, page.Offset, PAGE_SIZE);
+                await stream.WriteAsync(page.Array, page.Offset, PAGE_SIZE, cancellationToken)
+                            .ConfigureAwait(false);
 
-                // release page here (no page use after this)
                 page.Release();
-
                 count++;
             }
+        }
+        finally
+        {
+            _writerGate.Release();
         }
 
         return count;
     }
 
+    // ── Sync WAL write (Phase 4 bridge) ──────────────────────────────────────
+
     /// <summary>
-    /// Get file length based on data/log length variables (no direct on disk)
+    /// Phase 4 bridge: synchronous WAL write for code paths not yet converted to async.
+    /// All new code should use <see cref="WriteLogDisk(IEnumerable{PageBuffer},CancellationToken)"/>.
     /// </summary>
-    public long GetFileLength(FileOrigin origin)
+    internal int WriteLogDiskSync(IEnumerable<PageBuffer> pages)
     {
-        if (origin == FileOrigin.Log)
+        var count = 0;
+        var stream = _writer.Value;
+
+        _writerGate.Wait();
+        try
         {
-            return _logLength + PAGE_SIZE;
+            foreach (var page in pages)
+            {
+                ENSURE(page.ShareCounter == BUFFER_WRITABLE, "to enqueue page, page must be writable");
+
+                page.Position = Interlocked.Add(ref _logLength, PAGE_SIZE);
+                page.Origin = FileOrigin.Log;
+
+                Cache.MoveToReadable(page);
+
+                stream.Position = page.Position;
+
+#if DEBUG
+                _state.SimulateDiskWriteFail?.Invoke(page);
+#endif
+
+                stream.Write(page.Array, page.Offset, PAGE_SIZE);
+
+                page.Release();
+                count++;
+            }
+        }
+        finally
+        {
+            _writerGate.Release();
         }
 
-        return _dataLength + PAGE_SIZE;
+        return count;
     }
 
+    // ── Async data-file write (Phase 3 primary path) ──────────────────────────
+
     /// <summary>
-    /// Mark a file with a single signal to next open do auto-rebuild. Used only when closing database (after close files)
+    /// Write pages DIRECTLY to the data file (checkpoint path). Pages are not cached.
+    /// Uses <see cref="Stream.WriteAsync"/> and an async flush to avoid blocking.
     /// </summary>
-    internal void MarkAsInvalidState()
+    public async ValueTask WriteDataDisk(IEnumerable<PageBuffer> pages,
+        CancellationToken cancellationToken = default)
     {
-        FileHelper.TryExec(60, () =>
+        var stream = _dataPool.Writer.Value;
+
+        foreach (var page in pages)
         {
-            using (var stream = _dataFactory.GetStream(true, true))
-            {
-                var buffer = _bufferPool.Rent(PAGE_SIZE);
-                stream.Read(buffer, 0, PAGE_SIZE);
-                buffer[HeaderPage.P_INVALID_DATAFILE_STATE] = 1;
-                stream.Position = 0;
-                stream.Write(buffer, 0, PAGE_SIZE);
-                _bufferPool.Return(buffer, true);
-            }
-        });
+            ENSURE(page.ShareCounter == 0,
+                "this page can't be shared to use sync operation - do not use cached pages");
+
+            _dataLength = Math.Max(_dataLength, page.Position);
+
+            stream.Position = page.Position;
+            await stream.WriteAsync(page.Array, page.Offset, PAGE_SIZE, cancellationToken)
+                        .ConfigureAwait(false);
+        }
+
+        await stream.FlushToDiskAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    #region Sync Read/Write operations
+    // ── Sync ReadFull (startup/restore-index bridge) ──────────────────────────
 
     /// <summary>
-    /// Read all database pages inside file with no cache using. PageBuffers dont need to be Released
+    /// Read all database pages from <paramref name="origin"/> sequentially with no cache.
+    /// Kept synchronous for the engine startup / RestoreIndex path which runs before the
+    /// async lifecycle is active.  Use <see cref="ReadFullAsync"/> in all runtime paths.
     /// </summary>
     public IEnumerable<PageBuffer> ReadFull(FileOrigin origin)
     {
-        // do not use MemoryCache factory - reuse same buffer array (one page per time)
-        // do not use BufferPool because header page can't be shared (byte[] is used inside page return)
         var buffer = new byte[PAGE_SIZE];
-
         var pool = origin == FileOrigin.Log ? _logPool : _dataPool;
         var stream = pool.Rent();
 
         try
         {
-            // get length before starts (avoid grow during loop)
             var length = GetFileLength(origin);
-
             stream.Position = 0;
 
             while (stream.Position < length)
             {
                 var position = stream.Position;
-
                 var bytesRead = stream.Read(buffer, 0, PAGE_SIZE);
 
                 ENSURE(bytesRead == PAGE_SIZE, "ReadFull must read PAGE_SIZE bytes [{0}]", bytesRead);
@@ -308,53 +341,125 @@ internal class DiskService : IDisposable
         }
     }
 
+    // ── Async ReadFull (Phase 3 primary runtime path) ─────────────────────────
+
     /// <summary>
-    /// Write pages DIRECT in disk. This pages are not cached and are not shared - WORKS FOR DATA FILE ONLY
+    /// Asynchronously enumerate all pages in the given file origin.
+    /// Pages are streamed with no cache involvement; <c>PageBuffer</c> instances must NOT be
+    /// <c>Release()</c>'d by the caller because they are not cache-tracked.
+    /// Used by the checkpoint and WAL-index restore paths.
     /// </summary>
-    public void WriteDataDisk(IEnumerable<PageBuffer> pages)
+    public async IAsyncEnumerable<PageBuffer> ReadFullAsync(FileOrigin origin,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var stream = _dataPool.Writer.Value;
+        var buffer = new byte[PAGE_SIZE];
+        var pool = origin == FileOrigin.Log ? _logPool : _dataPool;
+        var stream = pool.Rent();
 
-        foreach (var page in pages)
+        try
         {
-            ENSURE(page.ShareCounter == 0, "this page can't be shared to use sync operation - do not use cached pages");
+            var length = GetFileLength(origin);
+            stream.Position = 0;
 
-            _dataLength = Math.Max(_dataLength, page.Position);
+            while (stream.Position < length)
+            {
+                var position = stream.Position;
+                var bytesRead = await stream.ReadAsync(buffer, 0, PAGE_SIZE, cancellationToken)
+                                            .ConfigureAwait(false);
 
-            stream.Position = page.Position;
+                ENSURE(bytesRead == PAGE_SIZE, "ReadFullAsync must read PAGE_SIZE bytes [{0}]", bytesRead);
 
-            stream.Write(page.Array, page.Offset, PAGE_SIZE);
+                yield return new PageBuffer(buffer, 0, 0)
+                {
+                    Position = position,
+                    Origin = origin,
+                    ShareCounter = 0
+                };
+            }
         }
-
-        stream.FlushToDisk();
+        finally
+        {
+            pool.Return(stream);
+        }
     }
 
-    /// <summary>
-    /// Set new length for file in sync mode. Queue must be empty before set length
-    /// </summary>
+    // ── Metadata helpers (non-I/O) ────────────────────────────────────────────
+
+    public long GetFileLength(FileOrigin origin)
+    {
+        if (origin == FileOrigin.Log)
+            return _logLength + PAGE_SIZE;
+        return _dataLength + PAGE_SIZE;
+    }
+
     public void SetLength(long length, FileOrigin origin)
     {
         var stream = origin == FileOrigin.Log ? _logPool.Writer : _dataPool.Writer;
 
         if (origin == FileOrigin.Log)
-        {
             Interlocked.Exchange(ref _logLength, length - PAGE_SIZE);
-        }
         else
-        {
             Interlocked.Exchange(ref _dataLength, length - PAGE_SIZE);
-        }
 
         stream.Value.SetLength(length);
     }
 
-    /// <summary>
-    /// Get file name (or Stream name)
-    /// </summary>
     public string GetName(FileOrigin origin)
     {
         return origin == FileOrigin.Data ? _dataFactory.Name : _logFactory.Name;
     }
 
-    #endregion
+    // ── Invalid-state marking ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Mark a file with a single signal so the next open triggers auto-rebuild.
+    /// Used on abnormal close; sync version kept for the sync Close path.
+    /// </summary>
+    internal void MarkAsInvalidState()
+    {
+        FileHelper.TryExec(60, () =>
+        {
+            using (var stream = _dataFactory.GetStream(true, true))
+            {
+                var buf = _bufferPool.Rent(PAGE_SIZE);
+                stream.Read(buf, 0, PAGE_SIZE);
+                buf[HeaderPage.P_INVALID_DATAFILE_STATE] = 1;
+                stream.Position = 0;
+                stream.Write(buf, 0, PAGE_SIZE);
+                _bufferPool.Return(buf, true);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Async version of <see cref="MarkAsInvalidState"/> for the async-close path.
+    /// </summary>
+    internal async ValueTask MarkAsInvalidStateAsync(CancellationToken cancellationToken = default)
+    {
+        // FileHelper.TryExec retries for up to 60 s; for the async path we perform one attempt
+        // and document that retry logic is a Phase 8 (lifecycle) concern.
+        try
+        {
+            // Regular using: stream disposal is synchronous; only the read/write calls are async.
+            using var stream = _dataFactory.GetStream(true, true);
+
+            var buf = _bufferPool.Rent(PAGE_SIZE);
+            try
+            {
+                await stream.ReadAsync(buf, 0, PAGE_SIZE, cancellationToken).ConfigureAwait(false);
+                buf[HeaderPage.P_INVALID_DATAFILE_STATE] = 1;
+                stream.Position = 0;
+                await stream.WriteAsync(buf, 0, PAGE_SIZE, cancellationToken).ConfigureAwait(false);
+                await stream.FlushToDiskAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _bufferPool.Return(buf, true);
+            }
+        }
+        catch
+        {
+            // Best-effort; errors are swallowed the same way the sync version swallows them.
+        }
+    }
 }

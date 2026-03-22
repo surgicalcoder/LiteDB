@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace LiteDbX.Utils;
 
@@ -26,6 +27,22 @@ internal class TryCatch
         try
         {
             action();
+        }
+        catch (Exception ex)
+        {
+            Exceptions.Add(ex);
+        }
+    }
+
+    /// <summary>
+    /// Awaitable catch for use on engine async-close paths.
+    /// </summary>
+    [DebuggerHidden]
+    public async Task CatchAsync(Func<Task> action)
+    {
+        try
+        {
+            await action().ConfigureAwait(false);
         }
         catch (Exception ex)
         {

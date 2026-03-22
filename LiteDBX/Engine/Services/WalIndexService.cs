@@ -1,139 +1,145 @@
-ï»¿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
 
 /// <summary>
-/// Do all WAL index services based on LOG file - has only single instance per engine
+/// Do all WAL index services based on LOG file — has only single instance per engine.
 /// [Singleton - ThreadSafe]
+///
+/// Phase 3 changes:
+/// <list type="bullet">
+///   <item><see cref="ReaderWriterLockSlim"/> replaced with <see cref="AsyncReaderWriterLock"/>
+///     so that write-lock acquisition does not block threads in async contexts.</item>
+///   <item><see cref="Checkpoint"/> and <see cref="TryCheckpoint"/> are now <c>async</c>,
+///     awaiting the exclusive lock and calling <see cref="DiskService.ReadFullAsync"/> /
+///     <see cref="DiskService.WriteDataDisk"/>.</item>
+///   <item><see cref="ConfirmTransaction"/> acquires the index write lock asynchronously.</item>
+///   <item><see cref="GetPageIndex"/> keeps a sync bridge entry via
+///     <see cref="AsyncReaderWriterLock.EnterReadSync"/> for the Phase 4 QueryExecutor path.</item>
+///   <item><see cref="Clear"/> and <see cref="RestoreIndex"/> keep their sync signatures (called
+///     from the sync engine startup path); async versions are provided for Phase 8.</item>
+/// </list>
 /// </summary>
 internal class WalIndexService
 {
     private readonly HashSet<uint> _confirmTransactions = new();
     private readonly DiskService _disk;
-
     private readonly Dictionary<uint, List<KeyValuePair<int, long>>> _index = new();
-    private readonly ReaderWriterLockSlim _indexLock = new();
+
+    // Phase 3: replaced ReaderWriterLockSlim with AsyncReaderWriterLock
+    private readonly AsyncReaderWriterLock _indexLock = new();
     private readonly LockService _locker;
 
-    private int _currentReadVersion;
+    /// <summary>Cached lock timeout, captured from <see cref="LockService.Timeout"/> at construction.</summary>
+    private readonly TimeSpan _lockTimeout;
 
-    /// <summary>
-    /// Store last used transaction ID
-    /// </summary>
+    private int _currentReadVersion;
     private int _lastTransactionID;
 
     public WalIndexService(DiskService disk, LockService locker)
     {
         _disk = disk;
         _locker = locker;
+        _lockTimeout = locker.Timeout;
     }
 
+    // -- CurrentReadVersion ----------------------------------------------------
+
     /// <summary>
-    /// Get current read version for all new transactions
+    /// Get current read version for all new transactions.
+    /// Phase 3 bridge: uses <see cref="AsyncReaderWriterLock.EnterReadSync"/> to avoid
+    /// replacing the entire property access pattern in Phase 3.
     /// </summary>
     public int CurrentReadVersion
     {
         get
         {
-            _indexLock.TryEnterReadLock(-1);
-
+            _indexLock.EnterReadSync(_lockTimeout);
             try
             {
                 return _currentReadVersion;
             }
             finally
             {
-                _indexLock.ExitReadLock();
+                _indexLock.ExitRead();
             }
         }
     }
 
-    /// <summary>
-    /// Get current counter for transaction ID
-    /// </summary>
     public int LastTransactionID => _lastTransactionID;
 
+    // -- Clear (sync, called from startup and from async CheckpointInternalAsync) ---
+
     /// <summary>
-    /// Clear WAL index links and cache memory. Used after checkpoint and rebuild rollback
+    /// Clear WAL index links and cache memory. Must be called while the index write lock is held.
+    /// </summary>
+    public void ClearUnderLock()
+    {
+        _confirmTransactions.Clear();
+        _index.Clear();
+        _lastTransactionID = 0;
+        _currentReadVersion = 0;
+        _disk.Cache.Clear();
+        _disk.SetLength(0, FileOrigin.Log);
+    }
+
+    /// <summary>
+    /// Clear WAL index and cache. Acquires the write lock synchronously.
+    /// Kept for the sync startup/recovery path.
     /// </summary>
     public void Clear()
     {
-        _indexLock.TryEnterWriteLock(-1);
-
+        _indexLock.EnterWriteAsync(_lockTimeout).GetAwaiter().GetResult();
         try
         {
-            // reset 
-            _confirmTransactions.Clear();
-            _index.Clear();
-
-            _lastTransactionID = 0;
-            _currentReadVersion = 0;
-
-            // clear cache
-            _disk.Cache.Clear();
-
-            // clear log file (sync)
-            _disk.SetLength(0, FileOrigin.Log);
+            ClearUnderLock();
         }
         finally
         {
-            _indexLock.ExitWriteLock();
+            _indexLock.ExitWrite();
         }
     }
 
-    /// <summary>
-    /// Get new transactionID in thread safe way
-    /// </summary>
-    public uint NextTransactionID()
-    {
-        return (uint)Interlocked.Increment(ref _lastTransactionID);
-    }
+    // -- NextTransactionID -----------------------------------------------------
+
+    public uint NextTransactionID() =>
+        (uint)Interlocked.Increment(ref _lastTransactionID);
+
+    // -- GetPageIndex (sync bridge) --------------------------------------------
 
     /// <summary>
-    /// Checks if a Page/Version are in WAL-index memory. Consider version that are below parameter. Returns PagePosition of
-    /// this page inside WAL-file or Empty if page doesn't found.
+    /// Check if a Page/Version is in WAL-index memory.
+    /// Phase 3 bridge: uses a sync read-lock entry. Phase 4 will convert callers to async.
     /// </summary>
     public long GetPageIndex(uint pageID, int version, out int walVersion)
     {
-        // wal-index versions must be greater than 0 (version 0 is datafile)
         if (version == 0)
         {
             walVersion = 0;
-
             return long.MaxValue;
         }
 
-        // to get page position, enter _index in read mode
-        _indexLock.TryEnterReadLock(-1);
-
+        _indexLock.EnterReadSync(_lockTimeout);
         try
         {
-            // get page slot in cache
             if (_index.TryGetValue(pageID, out var list))
             {
-                // list are sorted by version number
                 var idx = list.Count;
                 var position = long.MaxValue;
-
                 walVersion = version;
 
-                // get all page versions in wal-index
-                // and then filter only equals-or-less then selected version
                 while (idx > 0)
                 {
                     idx--;
-
                     var v = list[idx];
-
                     if (v.Key <= version)
                     {
                         walVersion = v.Key;
-
                         position = v.Value;
-
                         break;
                     }
                 }
@@ -142,74 +148,97 @@ internal class WalIndexService
             }
 
             walVersion = int.MaxValue;
-
             return long.MaxValue;
         }
         finally
         {
-            _indexLock.ExitReadLock();
+            _indexLock.ExitRead();
         }
     }
 
-    /// <summary>
-    /// Add transactionID in confirmed list and update WAL index with all pages positions
-    /// </summary>
-    public void ConfirmTransaction(uint transactionID, ICollection<PagePosition> pagePositions)
-    {
-        // must lock commit operation to update WAL-Index (memory only operation)
-        _indexLock.TryEnterWriteLock(-1);
+    // -- ConfirmTransaction (async) --------------------------------------------
 
+    /// <summary>
+    /// Add transactionID to the confirmed list and update the WAL index with page positions.
+    /// Acquires the index write lock asynchronously.
+    /// </summary>
+    public async ValueTask ConfirmTransactionAsync(uint transactionID,
+        ICollection<PagePosition> pagePositions, CancellationToken cancellationToken = default)
+    {
+        await _indexLock.EnterWriteAsync(_lockTimeout, cancellationToken).ConfigureAwait(false);
         try
         {
-            // increment current version
             _currentReadVersion++;
 
-            // update wal-index
             foreach (var pos in pagePositions)
             {
                 if (!_index.TryGetValue(pos.PageID, out var slot))
                 {
                     slot = new List<KeyValuePair<int, long>>();
-
                     _index.Add(pos.PageID, slot);
                 }
 
-                // add version/position into pageID slot
                 slot.Add(new KeyValuePair<int, long>(_currentReadVersion, pos.Position));
             }
 
-            // add transaction as confirmed
             _confirmTransactions.Add(transactionID);
         }
         finally
         {
-            _indexLock.ExitWriteLock();
+            _indexLock.ExitWrite();
         }
     }
 
     /// <summary>
-    /// Load all confirmed transactions from log file (used only when open datafile)
-    /// Don't need lock because it's called on ctor of LiteEngine
+    /// Phase 4 bridge: synchronous version of <see cref="ConfirmTransactionAsync"/>.
+    /// Used by the Recovery/Upgrade sync path.
+    /// </summary>
+    public void ConfirmTransaction(uint transactionID, ICollection<PagePosition> pagePositions)
+    {
+        _indexLock.EnterWriteAsync(_lockTimeout).GetAwaiter().GetResult();
+        try
+        {
+            _currentReadVersion++;
+
+            foreach (var pos in pagePositions)
+            {
+                if (!_index.TryGetValue(pos.PageID, out var slot))
+                {
+                    slot = new List<KeyValuePair<int, long>>();
+                    _index.Add(pos.PageID, slot);
+                }
+
+                slot.Add(new KeyValuePair<int, long>(_currentReadVersion, pos.Position));
+            }
+
+            _confirmTransactions.Add(transactionID);
+        }
+        finally
+        {
+            _indexLock.ExitWrite();
+        }
+    }
+
+    // -- RestoreIndex (sync, startup bridge) ----------------------------------
+
+    /// <summary>
+    /// Load all confirmed transactions from the log file (called during engine startup).
+    /// Uses the sync <see cref="DiskService.ReadFull"/> path because the engine lifecycle is not
+    /// yet async at this point. Phase 8 (lifecycle) will convert this to an async open path.
     /// </summary>
     public void RestoreIndex(ref HeaderPage header)
     {
-        // get all page positions
         var positions = new Dictionary<long, List<PagePosition>>();
         var current = 0L;
 
-        // read all pages to get confirmed transactions (do not read page content, only page header)
         foreach (var buffer in _disk.ReadFull(FileOrigin.Log))
         {
             if (buffer.IsBlank())
             {
-                // this should not happen, but if it does, it means there's a zeroed page in the file
-                // just skip it
                 current += PAGE_SIZE;
-
                 continue;
             }
 
-            // read direct from buffer to avoid create BasePage structure
             var pageID = buffer.ReadUInt32(BasePage.P_PAGE_ID);
             var isConfirmed = buffer.ReadBool(BasePage.P_IS_CONFIRMED);
             var transactionID = buffer.ReadUInt32(BasePage.P_TRANSACTION_ID);
@@ -217,13 +246,9 @@ internal class WalIndexService
             var position = new PagePosition(pageID, current);
 
             if (positions.TryGetValue(transactionID, out var list))
-            {
                 list.Add(position);
-            }
             else
-            {
                 positions[transactionID] = new List<PagePosition> { position };
-            }
 
             if (isConfirmed)
             {
@@ -231,134 +256,109 @@ internal class WalIndexService
 
                 var pageType = (PageType)buffer.ReadByte(BasePage.P_PAGE_TYPE);
 
-                // when a header is modified in transaction, must always be the last page inside log file (per transaction)
                 if (pageType == PageType.Header)
                 {
-                    // page buffer instance can't change
                     var headerBuffer = header.Buffer;
-
-                    // copy this buffer block into original header block
                     Buffer.BlockCopy(buffer.Array, buffer.Offset, headerBuffer.Array, headerBuffer.Offset, PAGE_SIZE);
-
-                    // re-load header (using new buffer data)
                     header = new HeaderPage(headerBuffer);
                     header.TransactionID = uint.MaxValue;
                     header.IsConfirmed = false;
                 }
             }
 
-            // update last transaction ID
             _lastTransactionID = (int)transactionID;
-
             current += PAGE_SIZE;
         }
     }
 
+    // -- Checkpoint (async) ----------------------------------------------------
+
     /// <summary>
-    /// Do checkpoint operation to copy log pages into data file. Return how many transactions was commited inside data file
-    /// Checkpoint requires exclusive lock database
+    /// Checkpoint: copy all committed log pages into the data file.
+    /// Returns the number of transactions committed to the data file.
+    /// Acquires the exclusive lock asynchronously and delegates I/O to the async disk paths.
     /// </summary>
-    public int Checkpoint()
+    public async ValueTask<int> Checkpoint(CancellationToken cancellationToken = default)
     {
-        // no log file or no confirmed transaction, just exit
         if (_disk.GetFileLength(FileOrigin.Log) == 0 || _confirmTransactions.Count == 0)
-        {
             return 0;
-        }
 
-        var mustExit = _locker.EnterExclusive();
-
+        var mustExit = await _locker.EnterExclusiveAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return CheckpointInternal();
+            return await CheckpointInternalAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             if (mustExit)
-            {
                 _locker.ExitExclusive();
-            }
         }
     }
 
     /// <summary>
-    /// Run checkpoint only if there is no open transactions
+    /// Run checkpoint only if there are no open transactions (non-blocking exclusive attempt).
     /// </summary>
-    public int TryCheckpoint()
+    public async ValueTask<int> TryCheckpoint(CancellationToken cancellationToken = default)
     {
-        // no log file or no confirmed transaction, just exit
         if (_disk.GetFileLength(FileOrigin.Log) == 0 || _confirmTransactions.Count == 0)
-        {
             return 0;
-        }
 
         if (!_locker.TryEnterExclusive(out var mustExit))
-        {
             return 0;
-        }
 
         try
         {
-            return CheckpointInternal();
+            return await CheckpointInternalAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             if (mustExit)
-            {
                 _locker.ExitExclusive();
-            }
         }
     }
 
-    /// <summary>
-    /// Do checkpoint operation to copy log pages into data file. Return how many transactions was commited inside data file
-    /// Checkpoint requires exclusive lock database
-    /// If soft = true, just try enter in exclusive mode - if not possible, just exit (don't execute checkpoint)
-    /// </summary>
-    private int CheckpointInternal()
+    private async ValueTask<int> CheckpointInternalAsync(CancellationToken cancellationToken)
     {
         LOG("checkpoint", "WAL");
 
         var counter = 0;
 
-        // getting all "good" pages from log file to be copied into data file
-        IEnumerable<PageBuffer> source()
+        // Collect confirmed pages from log file asynchronously.
+        var pagesToWrite = new List<PageBuffer>();
+
+        await foreach (var buffer in _disk.ReadFullAsync(FileOrigin.Log, cancellationToken)
+                                          .ConfigureAwait(false))
         {
-            foreach (var buffer in _disk.ReadFull(FileOrigin.Log))
+            if (buffer.IsBlank()) continue;
+
+            var transactionID = buffer.ReadUInt32(BasePage.P_TRANSACTION_ID);
+
+            if (_confirmTransactions.Contains(transactionID))
             {
-                if (buffer.IsBlank())
-                {
-                    // this should not happen, but if it does, it means there's a zeroed page in the file
-                    // just skip it
-                    continue;
-                }
+                var pageID = buffer.ReadUInt32(BasePage.P_PAGE_ID);
 
-                // read direct from buffer to avoid create BasePage structure
-                var transactionID = buffer.ReadUInt32(BasePage.P_TRANSACTION_ID);
+                buffer.Write(uint.MaxValue, BasePage.P_TRANSACTION_ID);
+                buffer.Write(false, BasePage.P_IS_CONFIRMED);
+                buffer.Position = BasePage.GetPagePosition(pageID);
 
-                // only confied paged can be write on data disk
-                if (_confirmTransactions.Contains(transactionID))
-                {
-                    var pageID = buffer.ReadUInt32(BasePage.P_PAGE_ID);
-
-                    // clear isConfirmed/transactionID
-                    buffer.Write(uint.MaxValue, BasePage.P_TRANSACTION_ID);
-                    buffer.Write(false, BasePage.P_IS_CONFIRMED);
-
-                    buffer.Position = BasePage.GetPagePosition(pageID);
-
-                    counter++;
-
-                    yield return buffer;
-                }
+                pagesToWrite.Add(buffer);
+                counter++;
             }
         }
 
-        // write all log pages into data file (sync)
-        _disk.WriteDataDisk(source());
+        // Write collected pages to the data file asynchronously.
+        await _disk.WriteDataDisk(pagesToWrite, cancellationToken).ConfigureAwait(false);
 
-        // clear log file, clear wal index, memory cache,
-        Clear();
+        // Reset WAL index and cache.
+        await _indexLock.EnterWriteAsync(_lockTimeout, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ClearUnderLock();
+        }
+        finally
+        {
+            _indexLock.ExitWrite();
+        }
 
         return counter;
     }

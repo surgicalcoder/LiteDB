@@ -19,27 +19,24 @@ public partial class LiteEngine : ILiteEngine, IDisposable
 {
     /// <summary>
     /// Run checkpoint command to copy log file into data file.
-    ///
-    /// Phase 2: signature updated to match <see cref="ILiteEngine.Checkpoint"/>.
-    /// Phase 3 bridge: WAL checkpoint is still synchronous internally; returns a completed <see cref="ValueTask{T}"/>.
-    /// Phase 3 (Disk and Streams) will make this truly async.
+    /// Phase 3: genuinely async — delegates to <see cref="WalIndexService.Checkpoint"/> which
+    /// uses <see cref="DiskService.ReadFullAsync"/> and <see cref="DiskService.WriteDataDisk"/>.
     /// </summary>
     public ValueTask<int> Checkpoint(CancellationToken cancellationToken = default)
     {
-        return new ValueTask<int>(_walIndex.Checkpoint());
+        return _walIndex.Checkpoint(cancellationToken);
     }
 
     // ── IAsyncDisposable ──────────────────────────────────────────────────────
 
     /// <summary>
     /// Async dispose — satisfies <see cref="ILiteEngine"/> / <see cref="IAsyncDisposable"/> contract.
-    /// Phase 3 bridge: <see cref="Close()"/> is still synchronous; returns a completed <see cref="ValueTask"/>.
+    /// Phase 3: delegates to the async close helpers so disk I/O on shutdown does not block a thread.
     /// </summary>
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        Dispose(true);
+        await CloseAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
-        return default;
     }
 
     // ── IDisposable (retained as a sync convenience for internal callers) ──────
@@ -232,7 +229,7 @@ public partial class LiteEngine : ILiteEngine, IDisposable
         if (_header?.Pragmas.Checkpoint > 0)
         {
             // do a soft checkpoint (only if exclusive lock is possible)
-            tc.Catch(() => _walIndex?.TryCheckpoint());
+            tc.Catch(() => _walIndex?.TryCheckpoint().GetAwaiter().GetResult());
         }
 
         // close all disk streams (and delete log if empty)
@@ -245,6 +242,44 @@ public partial class LiteEngine : ILiteEngine, IDisposable
         tc.Catch(() => _locker?.Dispose());
 
         return tc.Exceptions;
+    }
+
+    /// <summary>
+    /// Async close — uses <see cref="WalIndexService.TryCheckpoint"/> and
+    /// <see cref="DiskService.DisposeAsync"/> so shutdown I/O does not block a thread.
+    /// Phase 3 addition.
+    /// </summary>
+    internal async ValueTask<List<Exception>> CloseAsync()
+    {
+        if (_state.Disposed)
+            return new List<Exception>();
+
+        _state.Disposed = true;
+
+        var exceptions = new System.Collections.Generic.List<Exception>();
+
+        try { _monitor?.Dispose(); }
+        catch (Exception ex) { exceptions.Add(ex); }
+
+        if (_header?.Pragmas.Checkpoint > 0 && _walIndex != null)
+        {
+            try { await _walIndex.TryCheckpoint().ConfigureAwait(false); }
+            catch (Exception ex) { exceptions.Add(ex); }
+        }
+
+        if (_disk != null)
+        {
+            try { await _disk.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { exceptions.Add(ex); }
+        }
+
+        try { _sortDisk?.Dispose(); }
+        catch (Exception ex) { exceptions.Add(ex); }
+
+        try { _locker?.Dispose(); }
+        catch (Exception ex) { exceptions.Add(ex); }
+
+        return exceptions;
     }
 
     /// <summary>

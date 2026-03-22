@@ -34,7 +34,7 @@ public class Disk_Tests
         }
 
         // page will be saved in LOG file in PagePosition order (0-99)
-        disk.WriteLogDisk(pages);
+        disk.WriteLogDiskSync(pages);
 
         // after release, no page can be read/write
         pages.Clear();

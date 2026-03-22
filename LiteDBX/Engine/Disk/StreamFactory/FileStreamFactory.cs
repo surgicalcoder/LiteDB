@@ -1,4 +1,6 @@
 ﻿using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -6,6 +8,10 @@ namespace LiteDbX.Engine;
 /// <summary>
 /// FileStream disk implementation of disk factory
 /// [ThreadSafe]
+///
+/// Phase 3: all FileStream instances are now opened with <c>FileOptions.Asynchronous</c> so that
+/// <see cref="Stream.ReadAsync"/> / <see cref="Stream.WriteAsync"/> dispatch genuine OS-level
+/// async I/O (IOCP on Windows, io_uring / epoll on Linux) instead of blocking a thread-pool thread.
 /// </summary>
 internal class FileStreamFactory : IStreamFactory
 {
@@ -30,7 +36,9 @@ internal class FileStreamFactory : IStreamFactory
     public string Name => Path.GetFileName(_filename);
 
     /// <summary>
-    /// Create new data file FileStream instance based on filename
+    /// Create new data file FileStream instance based on filename.
+    /// Opens with <c>FileOptions.Asynchronous</c> (combined with sequential/random hint) so that
+    /// all read and write operations on the returned stream use async I/O paths.
     /// </summary>
     public Stream GetStream(bool canWrite, bool sequencial)
     {
@@ -39,7 +47,11 @@ internal class FileStreamFactory : IStreamFactory
         var fileMode = _readonly ? FileMode.Open : FileMode.OpenOrCreate;
         var fileAccess = write ? FileAccess.ReadWrite : FileAccess.Read;
         var fileShare = write ? FileShare.Read : FileShare.ReadWrite;
-        var fileOptions = sequencial ? FileOptions.SequentialScan : FileOptions.RandomAccess;
+
+        // Phase 3: always include FileOptions.Asynchronous so ReadAsync/WriteAsync use
+        // OS-level async I/O instead of falling back to synchronous thread-pool dispatches.
+        var fileOptions = FileOptions.Asynchronous |
+                          (sequencial ? FileOptions.SequentialScan : FileOptions.RandomAccess);
 
         var isNewFile = write && !Exists();
 
@@ -56,6 +68,17 @@ internal class FileStreamFactory : IStreamFactory
         }
 
         return _password == null || !_useAesStream ? stream : new AesStream(_password, stream);
+    }
+
+    /// <summary>
+    /// Async-compatible stream acquisition.
+    /// FileStream construction is synchronous in all current .NET runtimes, so this completes
+    /// synchronously; however the returned stream uses <c>FileOptions.Asynchronous</c> so its
+    /// read/write operations are genuinely non-blocking.
+    /// </summary>
+    public ValueTask<Stream> GetStreamAsync(bool canWrite, bool sequential, CancellationToken cancellationToken = default)
+    {
+        return new ValueTask<Stream>(GetStream(canWrite, sequential));
     }
 
     /// <summary>
@@ -84,7 +107,7 @@ internal class FileStreamFactory : IStreamFactory
                        FileAccess.Write,
                        FileShare.None,
                        PAGE_SIZE,
-                       FileOptions.SequentialScan))
+                       FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
                 fs.SetLength(length);
                 fs.FlushToDisk();

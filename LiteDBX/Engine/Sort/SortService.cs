@@ -94,7 +94,7 @@ internal class SortService : IDisposable
                 // store in disk
                 container.Position = _disk.GetContainerPosition();
 
-                _disk.Write(container.Position, _buffer);
+                _disk.WriteSync(container.Position, _buffer);
 
                 container.InitializeReader(_reader.Value, null, _pragmas.UtcDate);
             }

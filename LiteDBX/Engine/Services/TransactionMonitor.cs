@@ -28,6 +28,14 @@ internal class TransactionMonitor : IDisposable
     private readonly Dictionary<uint, TransactionService> _transactions = new();
     private readonly WalIndexService _walIndex;
 
+    /// <summary>
+    /// Serialises concurrent transaction commits that modify the header page.
+    /// Replaces the former <c>lock(_header)</c> pattern in <see cref="TransactionService"/>
+    /// so that commit operations can await the gate without blocking a thread.
+    /// Phase 3 addition.
+    /// </summary>
+    internal readonly SemaphoreSlim HeaderCommitGate = new SemaphoreSlim(1, 1);
+
     public TransactionMonitor(HeaderPage header, LockService locker, DiskService disk, WalIndexService walIndex)
     {
         _header = header;
@@ -51,6 +59,8 @@ internal class TransactionMonitor : IDisposable
                 transaction.Dispose();
             _transactions.Clear();
         }
+
+        HeaderCommitGate.Dispose();
     }
 
     // ── Async entry point (Phase 2 primary path) ──────────────────────────────

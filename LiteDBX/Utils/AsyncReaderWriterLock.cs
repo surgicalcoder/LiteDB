@@ -96,6 +96,35 @@ internal sealed class AsyncReaderWriterLock : IDisposable
         _writeLock.Release();
     }
 
+    // ── Sync bridge ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Phase 3 bridge: synchronously enter read mode. Blocks the calling thread briefly.
+    /// Used by <c>WalIndexService.GetPageIndex</c> which is still called from sync paths.
+    /// Replace callers with <see cref="EnterReadAsync"/> when those paths are converted.
+    /// </summary>
+    public void EnterReadSync(TimeSpan timeout)
+    {
+        if (!_readerGate.Wait(timeout))
+            throw new TimeoutException();
+        try
+        {
+            _readerCount++;
+            if (_readerCount == 1)
+            {
+                if (!_writeLock.Wait(timeout))
+                {
+                    _readerCount--;
+                    throw new TimeoutException();
+                }
+            }
+        }
+        finally
+        {
+            _readerGate.Release();
+        }
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     public void Dispose()

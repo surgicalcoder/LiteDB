@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -102,6 +103,76 @@ internal class MemoryCache : IDisposable
         }
 
         return -position;
+    }
+
+    /// <summary>
+    /// Async version of <see cref="GetReadablePage"/>. On a cache miss the page is loaded from
+    /// disk using the supplied async <paramref name="factory"/> so that no thread is blocked
+    /// waiting for I/O.
+    ///
+    /// Concurrency note: two concurrent async operations may both miss the cache for the same
+    /// position. Both load the page; only one wins the <c>TryAdd</c> race and the duplicate is
+    /// recycled back to the free list. This is safe because reading the same page position twice
+    /// is idempotent.
+    /// </summary>
+    public async ValueTask<PageBuffer> GetReadablePageAsync(long position, FileOrigin origin,
+        Func<long, BufferSlice, ValueTask> factory, CancellationToken cancellationToken = default)
+    {
+        var key = GetReadableKey(position, origin);
+
+        // Fast path: already cached.
+        if (_readable.TryGetValue(key, out var cached))
+        {
+            Interlocked.Exchange(ref cached.Timestamp, DateTime.UtcNow.Ticks);
+            Interlocked.Increment(ref cached.ShareCounter);
+            return cached;
+        }
+
+        // Slow path: load from disk asynchronously.
+        var newPage = GetFreePage();
+        newPage.Position = position;
+        newPage.Origin = origin;
+
+        await factory(position, newPage).ConfigureAwait(false);
+
+        // Attempt to register this page. Another concurrent caller may have added one first.
+        var page = _readable.GetOrAdd(key, newPage);
+
+        if (!ReferenceEquals(page, newPage))
+        {
+            // Duplicate load: recycle newPage back to the free list.
+            newPage.Position = long.MaxValue;
+            newPage.Origin = FileOrigin.None;
+            // ShareCounter is still 0 from GetFreePage(); safe to re-enqueue directly.
+            _free.Enqueue(newPage);
+        }
+
+        Interlocked.Exchange(ref page.Timestamp, DateTime.UtcNow.Ticks);
+        Interlocked.Increment(ref page.ShareCounter);
+        return page;
+    }
+
+    /// <summary>
+    /// Async version of <see cref="GetWritablePage"/>. The writable page always gets its own
+    /// buffer; if a clean cached copy exists it is block-copied synchronously (CPU only, no I/O).
+    /// If no cached copy exists the page is loaded from disk using the async <paramref name="factory"/>.
+    /// </summary>
+    public async ValueTask<PageBuffer> GetWritablePageAsync(long position, FileOrigin origin,
+        Func<long, BufferSlice, ValueTask> factory, CancellationToken cancellationToken = default)
+    {
+        var key = GetReadableKey(position, origin);
+        var writable = NewPage(position, origin);
+
+        if (_readable.TryGetValue(key, out var clean))
+        {
+            Buffer.BlockCopy(clean.Array, clean.Offset, writable.Array, writable.Offset, PAGE_SIZE);
+        }
+        else
+        {
+            await factory(position, writable).ConfigureAwait(false);
+        }
+
+        return writable;
     }
 
     #endregion

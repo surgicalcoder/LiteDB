@@ -59,7 +59,7 @@ public partial class LiteEngine
         {
             if (_state.Handle(ex))
             {
-                transaction.Rollback();
+                await transaction.RollbackAsync(ct).ConfigureAwait(false);
                 _monitor.ReleaseTransaction(transaction);
             }
 
@@ -69,7 +69,7 @@ public partial class LiteEngine
 
     private async ValueTask CommitAndReleaseTransactionAsync(TransactionService transaction, CancellationToken ct = default)
     {
-        transaction.Commit();
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
 
         _monitor.ReleaseTransaction(transaction);
 
@@ -77,8 +77,7 @@ public partial class LiteEngine
         if (_header.Pragmas.Checkpoint > 0 &&
             _disk.GetFileLength(FileOrigin.Log) > _header.Pragmas.Checkpoint * PAGE_SIZE)
         {
-            // Phase 3 bridge: TryCheckpoint is still sync internally.
-            _walIndex.TryCheckpoint();
+            await _walIndex.TryCheckpoint(ct).ConfigureAwait(false);
         }
     }
 }

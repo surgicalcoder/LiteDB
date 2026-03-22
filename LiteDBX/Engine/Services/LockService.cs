@@ -37,6 +37,12 @@ internal class LockService : IDisposable
         _pragmas = pragmas;
     }
 
+    /// <summary>
+    /// Exposes the configured lock timeout so cooperating services (e.g. WalIndexService)
+    /// can use the same timeout value without holding a direct reference to EnginePragmas.
+    /// </summary>
+    public TimeSpan Timeout => _pragmas.Timeout;
+
     public void Dispose()
     {
         _transactionGate.Dispose();
