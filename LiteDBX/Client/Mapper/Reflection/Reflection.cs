@@ -210,7 +210,7 @@ internal partial class Reflection
     /// </summary>
     public static bool IsEnumerable(Type type)
     {
-        if (type == typeof(IEnumerable) || type.IsArray)
+        if (type == typeof(IEnumerable) || type == typeof(Enumerable) || type.IsArray)
         {
             return true;
         }
