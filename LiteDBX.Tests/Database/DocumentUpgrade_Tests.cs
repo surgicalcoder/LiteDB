@@ -1,12 +1,9 @@
-using FluentAssertions;
-
-using LiteDB.Engine;
-
 using System.IO;
-
+using FluentAssertions;
+using LiteDbX.Engine;
 using Xunit;
 
-namespace LiteDB.Tests.Database;
+namespace LiteDbX.Tests.Database;
 
 public class DocumentUpgrade_Tests
 {
@@ -14,6 +11,7 @@ public class DocumentUpgrade_Tests
     public void DocumentUpgrade_Test()
     {
         var ms = new MemoryStream();
+
         using (var db = new LiteDatabase(ms))
         {
             var col = db.GetCollection("col");
@@ -76,6 +74,7 @@ public class DocumentUpgrade_Tests
     public void DocumentUpgrade_BsonMapper_Test()
     {
         var ms = new MemoryStream();
+
         using (var db = new LiteDatabase(ms))
         {
             var col = db.GetCollection("col");

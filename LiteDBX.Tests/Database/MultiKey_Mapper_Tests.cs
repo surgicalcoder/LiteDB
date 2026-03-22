@@ -1,73 +1,71 @@
 ﻿using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using FluentAssertions;
 using Xunit;
 
-namespace LiteDB.Tests.Database
+namespace LiteDbX.Tests.Database;
+
+public class MultiKey_Mapper_Tests
 {
-    public class MultiKey_Mapper_Tests
+    [Fact]
+    public void MultiKey_Mapper()
     {
-        #region Model
-
-        public class MultiKeyDoc
+        using (var db = new LiteDatabase(":memory:"))
         {
-            public int Id { get; set; }
-            public int[] Keys { get; set; }
-            public List<Customer> Customers { get; set; }
-        }
+            var col = db.GetCollection<MultiKeyDoc>("col");
 
-        public class Customer
-        {
-            public string Login { get; set; }
-            public string Name { get; set; }
-        }
-
-        #endregion
-
-        [Fact]
-        public void MultiKey_Mapper()
-        {
-            using (var db = new LiteDatabase(":memory:"))
+            col.Insert(new MultiKeyDoc
             {
-                var col = db.GetCollection<MultiKeyDoc>("col");
-
-                col.Insert(new MultiKeyDoc
+                Id = 1,
+                Keys = new[] { 1, 2, 3 },
+                Customers = new List<Customer>
                 {
-                    Id = 1,
-                    Keys = new int[] { 1, 2, 3 },
-                    Customers = new List<Customer>()
-                    {
-                        new Customer { Name = "John" },
-                        new Customer { Name = "Ana" },
-                        new Customer { Name = "Doe" },
-                        new Customer { Name = "Dante" }
-                    }
-                });
+                    new() { Name = "John" },
+                    new() { Name = "Ana" },
+                    new() { Name = "Doe" },
+                    new() { Name = "Dante" }
+                }
+            });
 
-                col.Insert(new MultiKeyDoc
+            col.Insert(new MultiKeyDoc
+            {
+                Id = 2,
+                Keys = new[] { 2 },
+                Customers = new List<Customer>
                 {
-                    Id = 2,
-                    Keys = new int[] { 2 },
-                    Customers = new List<Customer>()
-                    {
-                        new Customer { Name = "Ana" }
-                    }
-                });
+                    new() { Name = "Ana" }
+                }
+            });
 
-                col.EnsureIndex(x => x.Keys);
-                col.EnsureIndex(x => x.Customers.Select(z => z.Name));
+            col.EnsureIndex(x => x.Keys);
+            col.EnsureIndex(x => x.Customers.Select(z => z.Name));
 
-                // Query.EQ("Keys", 2)
-                col.Count(Query.Any().EQ("Keys", 2)).Should().Be(2);
-                col.Count(x => x.Keys.Contains(2)).Should().Be(2);
+            // Query.EQ("Keys", 2)
+            col.Count(Query.Any().EQ("Keys", 2)).Should().Be(2);
+            col.Count(x => x.Keys.Contains(2)).Should().Be(2);
 
-                col.Count(Query.Any().StartsWith("Customers[*].Name", "Ana")).Should().Be(2);
-                col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("Ana"))).Should().Be(2);
+            col.Count(Query.Any().StartsWith("Customers[*].Name", "Ana")).Should().Be(2);
+            col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("Ana"))).Should().Be(2);
 
-                col.Count(Query.Any().StartsWith("Customers[*].Name", "D")).Should().Be(1);
-                col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("D"))).Should().Be(1);
-            }
+            col.Count(Query.Any().StartsWith("Customers[*].Name", "D")).Should().Be(1);
+            col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("D"))).Should().Be(1);
         }
     }
+
+    #region Model
+
+    public class MultiKeyDoc
+    {
+        public int Id { get; set; }
+        public int[] Keys { get; set; }
+        public List<Customer> Customers { get; set; }
+    }
+
+    public class Customer
+    {
+        public string Login { get; set; }
+        public string Name { get; set; }
+    }
+
+    #endregion
 }

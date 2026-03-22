@@ -1,23 +1,21 @@
 ﻿using System;
-using static LiteDB.Constants;
 
-namespace LiteDB
+namespace LiteDbX;
+
+/// <summary>
+/// Indicate that property will be used as BsonDocument Id
+/// </summary>
+public class BsonIdAttribute : Attribute
 {
-    /// <summary>
-    /// Indicate that property will be used as BsonDocument Id
-    /// </summary>
-    public class BsonIdAttribute : Attribute
+    public BsonIdAttribute()
     {
-        public bool AutoId { get; private set; }
-
-        public BsonIdAttribute()
-        {
-            this.AutoId = true;
-        }
-
-        public BsonIdAttribute(bool autoId)
-        {
-            this.AutoId = autoId;
-        }
+        AutoId = true;
     }
+
+    public BsonIdAttribute(bool autoId)
+    {
+        AutoId = autoId;
+    }
+
+    public bool AutoId { get; private set; }
 }

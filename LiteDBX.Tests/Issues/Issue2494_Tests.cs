@@ -1,13 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 using Xunit;
 
-namespace LiteDB.Tests.Issues;
+namespace LiteDbX.Tests.Issues;
 
 public class Issue2494_Tests
 {
@@ -20,7 +14,7 @@ public class Issue2494_Tests
         var connectionString = new ConnectionString(filename)
         {
             Password = "pass123",
-            Upgrade = true,
+            Upgrade = true
         };
 
         using (var db = new LiteDatabase(connectionString)) // <= throws as of version 5.0.18
@@ -32,19 +26,17 @@ public class Issue2494_Tests
 
     public class PlayerDto
     {
-        [BsonId]
-        public Guid Id { get; set; }
-
-        public string Name { get; set; }
-
         public PlayerDto(Guid id, string name)
         {
             Id = id;
             Name = name;
         }
 
-        public PlayerDto()
-        {
-        }
+        public PlayerDto() { }
+
+        [BsonId]
+        public Guid Id { get; set; }
+
+        public string Name { get; set; }
     }
 }

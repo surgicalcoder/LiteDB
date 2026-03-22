@@ -1,32 +1,32 @@
-﻿using FluentAssertions;
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
-using Xunit;
 
-namespace LiteDB.Tests.QueryTest
+namespace LiteDbX.Tests.QueryTest;
+
+public class PersonGroupByData : IDisposable
 {
-    public class PersonGroupByData : IDisposable
+    private readonly ILiteCollection<Person> _collection;
+    private readonly ILiteDatabase _db;
+    private readonly Person[] _local;
+
+    public PersonGroupByData()
     {
-        private readonly Person[] _local;
-        private readonly ILiteDatabase _db;
-        private readonly ILiteCollection<Person> _collection;
+        _local = DataGen.Person(1, 1000).ToArray();
+        _db = new LiteDatabase(new MemoryStream());
+        _collection = _db.GetCollection<Person>();
 
-        public PersonGroupByData()
-        {
-            _local = DataGen.Person(1, 1000).ToArray();
-            _db = new LiteDatabase(new MemoryStream());
-            _collection = _db.GetCollection<Person>();
+        _collection.Insert(_local);
+        _collection.EnsureIndex(x => x.Age);
+    }
 
-            _collection.Insert(_local);
-            _collection.EnsureIndex(x => x.Age);
-        }
+    public void Dispose()
+    {
+        _db.Dispose();
+    }
 
-        public (ILiteCollection<Person>, Person[]) GetData() => (_collection, _local);
-
-        public void Dispose()
-        {
-            _db.Dispose();
-        }
+    public (ILiteCollection<Person>, Person[]) GetData()
+    {
+        return (_collection, _local);
     }
 }

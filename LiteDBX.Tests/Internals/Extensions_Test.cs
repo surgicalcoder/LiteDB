@@ -1,14 +1,9 @@
-﻿using LiteDB.Utils.Extensions;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿using System.Diagnostics;
 using System.Threading.Tasks;
-
+using LiteDbX.Utils.Extensions;
 using Xunit;
 
-namespace LiteDB.Tests.Internals;
+namespace LiteDbX.Tests.Internals;
 
 public class Extensions_Test
 {
@@ -33,7 +28,8 @@ public class Extensions_Test
     [Fact]
     public async Task StopWatchExtensions_StartDisposable()
     {
-        var stopwatch = new System.Diagnostics.Stopwatch();
+        var stopwatch = new Stopwatch();
+
         using (stopwatch.StartDisposable())
         {
             await Task.Delay(100);

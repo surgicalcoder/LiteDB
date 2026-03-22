@@ -1,22 +1,22 @@
-﻿using System.Linq;
-using FluentAssertions;
+﻿using FluentAssertions;
 using Xunit;
 
-namespace LiteDB.Tests.Engine
+namespace LiteDbX.Tests.Engine;
+
+public class DropCollection_Tests
 {
-    public class DropCollection_Tests
+    [Fact]
+    public void DropCollection()
     {
-        [Fact]
-        public void DropCollection()
+        using (var file = new TempFile())
         {
-            using (var file = new TempFile())
             using (var db = new LiteDatabase(file.Filename))
             {
                 db.GetCollectionNames().Should().NotContain("col");
 
                 var col = db.GetCollection("col");
 
-                col.Insert(new BsonDocument {["a"] = 1});
+                col.Insert(new BsonDocument { ["a"] = 1 });
 
                 db.GetCollectionNames().Should().Contain("col");
 
@@ -25,25 +25,25 @@ namespace LiteDB.Tests.Engine
                 db.GetCollectionNames().Should().NotContain("col");
             }
         }
+    }
 
-        [Fact]
-        public void InsertDropCollection()
+    [Fact]
+    public void InsertDropCollection()
+    {
+        using (var file = new TempFile())
         {
-            using (var file = new TempFile())
+            using (var db = new LiteDatabase(file.Filename))
             {
-                using (var db = new LiteDatabase(file.Filename))
-                {
-                    var col = db.GetCollection("test");
-                    col.Insert(new BsonDocument { ["_id"] = 1 });
-                    db.DropCollection("test");
-                    db.Rebuild();
-                }
+                var col = db.GetCollection("test");
+                col.Insert(new BsonDocument { ["_id"] = 1 });
+                db.DropCollection("test");
+                db.Rebuild();
+            }
 
-                using (var db = new LiteDatabase(file.Filename))
-                {
-                    var col = db.GetCollection("test");
-                    col.Insert(new BsonDocument { ["_id"] = 1 });
-                }
+            using (var db = new LiteDatabase(file.Filename))
+            {
+                var col = db.GetCollection("test");
+                col.Insert(new BsonDocument { ["_id"] = 1 });
             }
         }
     }

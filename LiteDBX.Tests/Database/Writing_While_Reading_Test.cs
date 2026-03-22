@@ -1,7 +1,6 @@
-﻿using System.IO;
-using Xunit;
+﻿using Xunit;
 
-namespace LiteDB.Tests.Database;
+namespace LiteDbX.Tests.Database;
 
 public class Writing_While_Reading_Test
 {
@@ -9,6 +8,7 @@ public class Writing_While_Reading_Test
     public void Test()
     {
         using var f = new TempFile();
+
         using (var db = new LiteDatabase(f.Filename))
         {
             var col = db.GetCollection<MyClass>("col");
@@ -21,6 +21,7 @@ public class Writing_While_Reading_Test
         using (var db = new LiteDatabase(f.Filename))
         {
             var col = db.GetCollection<MyClass>("col");
+
             foreach (var item in col.FindAll())
             {
                 item.Description += " Changed";
@@ -34,6 +35,7 @@ public class Writing_While_Reading_Test
         using (var db = new LiteDatabase(f.Filename))
         {
             var col = db.GetCollection<MyClass>("col");
+
             foreach (var item in col.FindAll())
             {
                 Assert.EndsWith("Changed", item.Description);
@@ -41,7 +43,7 @@ public class Writing_While_Reading_Test
         }
     }
 
-    class MyClass
+    private class MyClass
     {
         public int Id { get; set; }
 

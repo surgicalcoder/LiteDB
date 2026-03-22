@@ -1,87 +1,89 @@
 using System.Collections.Generic;
 using System.IO;
 using BenchmarkDotNet.Attributes;
-using LiteDB.Benchmarks.Models;
-using LiteDB.Benchmarks.Models.Generators;
+using LiteDbX.Benchmarks.Models;
+using LiteDbX.Benchmarks.Models.Generators;
 
-namespace LiteDB.Benchmarks.Benchmarks.Insertion
+namespace LiteDbX.Benchmarks.Benchmarks.Insertion
 {
-	[BenchmarkCategory(Constants.Categories.INSERTION)]
-	public class InsertionBasicBenchmark : BenchmarkBase
-	{
-		private List<FileMetaBase> _data;
-		private ILiteCollection<FileMetaBase> _fileMetaCollection;
+    [BenchmarkCategory(Constants.Categories.INSERTION)]
+    public class InsertionBasicBenchmark : BenchmarkBase
+    {
+        private List<FileMetaBase> _data;
+        private ILiteCollection<FileMetaBase> _fileMetaCollection;
 
-		[GlobalSetup]
-		public void GlobalSetup()
-		{
-			File.Delete(DatabasePath);
+        [GlobalSetup]
+        public void GlobalSetup()
+        {
+            File.Delete(DatabasePath);
 
-			DatabaseInstance = new LiteDatabase(ConnectionString());
-			_fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
+            DatabaseInstance = new LiteDatabase(ConnectionString());
+            _fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
 
-			_data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize); // executed once per each N value
-		}
+            _data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize); // executed once per each N value
+        }
 
-		[Benchmark(Baseline = true)]
-		public int Insertion()
-		{
-			var count = _fileMetaCollection.Insert(_data);
-			DatabaseInstance.Checkpoint();
-			return count;
-		}
+        [Benchmark(Baseline = true)]
+        public int Insertion()
+        {
+            var count = _fileMetaCollection.Insert(_data);
+            DatabaseInstance.Checkpoint();
 
-		[Benchmark]
-		public void InsertionWithLoop()
-		{
-			// ReSharper disable once ForCanBeConvertedToForeach
-			for (var i = 0; i < _data.Count; i++)
-			{
-				_fileMetaCollection.Insert(_data[i]);
-			}
+            return count;
+        }
 
-			DatabaseInstance.Checkpoint();
-		}
+        [Benchmark]
+        public void InsertionWithLoop()
+        {
+            // ReSharper disable once ForCanBeConvertedToForeach
+            for (var i = 0; i < _data.Count; i++)
+            {
+                _fileMetaCollection.Insert(_data[i]);
+            }
 
-		[Benchmark]
-		public int Upsertion()
-		{
-			var count = _fileMetaCollection.Upsert(_data);
-			DatabaseInstance.Checkpoint();
-			return count;
-		}
+            DatabaseInstance.Checkpoint();
+        }
 
-		[Benchmark]
-		public void UpsertionWithLoop()
-		{
-			// ReSharper disable once ForCanBeConvertedToForeach
-			for (var i = 0; i < _data.Count; i++)
-			{
-				_fileMetaCollection.Upsert(_data[i]);
-			}
+        [Benchmark]
+        public int Upsertion()
+        {
+            var count = _fileMetaCollection.Upsert(_data);
+            DatabaseInstance.Checkpoint();
 
-			DatabaseInstance.Checkpoint();
-		}
+            return count;
+        }
 
-		[IterationCleanup]
-		public void IterationCleanup()
-		{
-			const string collectionName = nameof(FileMetaBase);
+        [Benchmark]
+        public void UpsertionWithLoop()
+        {
+            // ReSharper disable once ForCanBeConvertedToForeach
+            for (var i = 0; i < _data.Count; i++)
+            {
+                _fileMetaCollection.Upsert(_data[i]);
+            }
 
-			DatabaseInstance.DropCollection(collectionName);
+            DatabaseInstance.Checkpoint();
+        }
 
-			DatabaseInstance.Checkpoint();
-			DatabaseInstance.Rebuild();
-		}
+        [IterationCleanup]
+        public void IterationCleanup()
+        {
+            const string collectionName = nameof(FileMetaBase);
 
-		[GlobalCleanup]
-		public void GlobalCleanup()
-		{
-			DatabaseInstance?.Checkpoint();
-			DatabaseInstance?.Dispose();
-			DatabaseInstance = null;
+            DatabaseInstance.DropCollection(collectionName);
 
-			File.Delete(DatabasePath);
-		}
-	}
+            DatabaseInstance.Checkpoint();
+            DatabaseInstance.Rebuild();
+        }
+
+        [GlobalCleanup]
+        public void GlobalCleanup()
+        {
+            DatabaseInstance?.Checkpoint();
+            DatabaseInstance?.Dispose();
+            DatabaseInstance = null;
+
+            File.Delete(DatabasePath);
+        }
+    }
 }

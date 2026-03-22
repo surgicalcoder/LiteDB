@@ -1,18 +1,16 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Security.Cryptography;
+﻿using System.Linq;
 using FluentAssertions;
 using Xunit;
 
-namespace LiteDB.Tests.Database
+namespace LiteDbX.Tests.Database;
+
+public class Site_Tests
 {
-    public class Site_Tests
+    [Fact]
+    public void Home_Example()
     {
-        [Fact]
-        public void Home_Example()
+        using (var f = new TempFile())
         {
-            using (var f = new TempFile())
             using (var db = new LiteDatabase(f.Filename))
             {
                 // Get customer collection
@@ -22,7 +20,7 @@ namespace LiteDB.Tests.Database
                 var customer = new Customer
                 {
                     Name = "John Doe",
-                    Phones = new string[] { "8000-0000", "9000-0000" },
+                    Phones = new[] { "8000-0000", "9000-0000" },
                     IsActive = true
                 };
 
@@ -44,11 +42,11 @@ namespace LiteDB.Tests.Database
 
                 // Or you can query using new Query() syntax
                 var results2 = customers.Query()
-                    .Where(x => x.Phones.Any(p => p.StartsWith("8000")))
-                    .OrderBy(x => x.Name)
-                    .Select(x => new { x.Id, x.Name })
-                    .Limit(10)
-                    .ToList();
+                                        .Where(x => x.Phones.Any(p => p.StartsWith("8000")))
+                                        .OrderBy(x => x.Name)
+                                        .Select(x => new { x.Id, x.Name })
+                                        .Limit(10)
+                                        .ToList();
 
                 // Or using SQL
                 var reader = db.Execute(
@@ -60,16 +58,15 @@ namespace LiteDB.Tests.Database
 
                 results2.Count.Should().Be(1);
                 reader.ToList().Count.Should().Be(1);
-
             }
         }
+    }
 
-        public class Customer
-        {
-            public int Id { get; set; }
-            public string Name { get; set; }
-            public string[] Phones { get; set; }
-            public bool IsActive { get; set; }
-        }
+    public class Customer
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public string[] Phones { get; set; }
+        public bool IsActive { get; set; }
     }
 }

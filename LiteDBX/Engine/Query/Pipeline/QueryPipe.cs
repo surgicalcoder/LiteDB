@@ -1,122 +1,121 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
-using static LiteDB.Constants;
 
-namespace LiteDB.Engine
+namespace LiteDbX.Engine;
+
+/// <summary>
+/// Basic query pipe workflow - support filter, includes and orderby
+/// </summary>
+internal class QueryPipe : BasePipe
 {
+    public QueryPipe(TransactionService transaction, IDocumentLookup loader, SortDisk tempDisk, EnginePragmas pragmas, uint maxItemsCount)
+        : base(transaction, loader, tempDisk, pragmas, maxItemsCount) { }
+
     /// <summary>
-    /// Basic query pipe workflow - support filter, includes and orderby
+    /// Query Pipe order
+    /// - LoadDocument
+    /// - IncludeBefore
+    /// - Filter
+    /// - OrderBy
+    /// - OffSet
+    /// - Limit
+    /// - IncludeAfter
+    /// - Select
     /// </summary>
-    internal class QueryPipe : BasePipe
+    public override IEnumerable<BsonDocument> Pipe(IEnumerable<IndexNode> nodes, QueryPlan query)
     {
-        public QueryPipe(TransactionService transaction, IDocumentLookup loader, SortDisk tempDisk, EnginePragmas pragmas, uint maxItemsCount)
-            : base(transaction, loader, tempDisk, pragmas, maxItemsCount)
+        // starts pipe loading document
+        var source = LoadDocument(nodes);
+
+        // do includes in result before filter
+        foreach (var path in query.IncludeBefore)
         {
+            source = Include(source, path);
         }
 
-        /// <summary>
-        /// Query Pipe order
-        /// - LoadDocument
-        /// - IncludeBefore
-        /// - Filter
-        /// - OrderBy
-        /// - OffSet
-        /// - Limit
-        /// - IncludeAfter
-        /// - Select
-        /// </summary>
-        public override IEnumerable<BsonDocument> Pipe(IEnumerable<IndexNode> nodes, QueryPlan query)
+        // filter results according expressions
+        foreach (var expr in query.Filters)
         {
-            // starts pipe loading document
-            var source = this.LoadDocument(nodes);
+            source = Filter(source, expr);
+        }
 
-            // do includes in result before filter
-            foreach (var path in query.IncludeBefore)
+        if (query.OrderBy != null)
+        {
+            // pipe: orderby with offset+limit
+            source = OrderBy(source, query.OrderBy.Expression, query.OrderBy.Order, query.Offset, query.Limit);
+        }
+        else
+        {
+            // pipe: apply offset (no orderby)
+            if (query.Offset > 0)
             {
-                source = this.Include(source, path);
+                source = source.Skip(query.Offset);
             }
 
-            // filter results according expressions
-            foreach (var expr in query.Filters)
+            // pipe: apply limit (no orderby)
+            if (query.Limit < int.MaxValue)
             {
-                source = this.Filter(source, expr);
+                source = source.Take(query.Limit);
             }
+        }
 
-            if (query.OrderBy != null)
+        // do includes in result after filter
+        foreach (var path in query.IncludeAfter)
+        {
+            source = Include(source, path);
+        }
+
+        // if is an aggregate query, run select transform over all resultset - will return a single value
+        if (query.Select.All)
+        {
+            return SelectAll(source, query.Select.Expression);
+        }
+        // run select transform in each document and return a new document or value
+
+        return Select(source, query.Select.Expression);
+    }
+
+    /// <summary>
+    /// Pipe: Transaform final result appling expressin transform. Can return document or simple values
+    /// </summary>
+    private IEnumerable<BsonDocument> Select(IEnumerable<BsonDocument> source, BsonExpression select)
+    {
+        var defaultName = select.DefaultFieldName();
+
+        foreach (var doc in source)
+        {
+            var value = select.ExecuteScalar(doc, _pragmas.Collation);
+
+            if (value.IsDocument)
             {
-                // pipe: orderby with offset+limit
-                source = this.OrderBy(source, query.OrderBy.Expression, query.OrderBy.Order, query.Offset, query.Limit);
+                yield return value.AsDocument;
             }
             else
             {
-                // pipe: apply offset (no orderby)
-                if (query.Offset > 0) source = source.Skip(query.Offset);
-
-                // pipe: apply limit (no orderby)
-                if (query.Limit < int.MaxValue) source = source.Take(query.Limit);
+                yield return new BsonDocument { [defaultName] = value };
             }
+        }
+    }
 
-            // do includes in result after filter
-            foreach (var path in query.IncludeAfter)
+    /// <summary>
+    /// Pipe: Run select expression over all recordset
+    /// </summary>
+    private IEnumerable<BsonDocument> SelectAll(IEnumerable<BsonDocument> source, BsonExpression select)
+    {
+        var cached = new DocumentCacheEnumerable(source, _lookup);
+
+        var defaultName = select.DefaultFieldName();
+        var result = select.Execute(cached, _pragmas.Collation);
+
+        foreach (var value in result)
+        {
+            if (value.IsDocument)
             {
-                source = this.Include(source, path);
+                yield return value.AsDocument;
             }
-
-            // if is an aggregate query, run select transform over all resultset - will return a single value
-            if (query.Select.All)
-            {
-                return this.SelectAll(source, query.Select.Expression);
-            }
-            // run select transform in each document and return a new document or value
             else
             {
-                return this.Select(source, query.Select.Expression);
-            }
-        }
-
-        /// <summary>
-        /// Pipe: Transaform final result appling expressin transform. Can return document or simple values
-        /// </summary>
-        private IEnumerable<BsonDocument> Select(IEnumerable<BsonDocument> source, BsonExpression select)
-        {
-            var defaultName = select.DefaultFieldName();
-
-            foreach (var doc in source)
-            {
-                var value = select.ExecuteScalar(doc, _pragmas.Collation);
-
-                if (value.IsDocument)
-                {
-                    yield return value.AsDocument;
-                }
-                else
-                {
-                    yield return new BsonDocument { [defaultName] = value };
-                }
-            }
-        }
-
-        /// <summary>
-        /// Pipe: Run select expression over all recordset
-        /// </summary>
-        private IEnumerable<BsonDocument> SelectAll(IEnumerable<BsonDocument> source, BsonExpression select)
-        {
-            var cached = new DocumentCacheEnumerable(source, _lookup);
-
-            var defaultName = select.DefaultFieldName();
-            var result = select.Execute(cached, _pragmas.Collation);
-
-            foreach (var value in result)
-            {
-                if (value.IsDocument)
-                {
-                    yield return value.AsDocument;
-                }
-                else
-                {
-                    yield return new BsonDocument { [defaultName] = value };
-                }
+                yield return new BsonDocument { [defaultName] = value };
             }
         }
     }

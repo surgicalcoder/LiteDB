@@ -1,87 +1,96 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
-using LiteDB.Shell.Commands;
 
-namespace LiteDB.Shell
+namespace LiteDbX.Shell;
+
+internal class ShellProgram
 {
-    internal class ShellProgram
+    public static void Start(InputCommand input, Display display)
     {
-        public static void Start(InputCommand input, Display display)
+        var env = new Env { Input = input, Display = display };
+
+        // show welcome message
+        display.WriteWelcome();
+
+        Console.CancelKeyPress += (o, e) =>
         {
-            var env = new Env { Input = input, Display = display };
+            e.Cancel = true;
+            env.Running = false;
+        };
 
-            // show welcome message
-            display.WriteWelcome();
+        while (input.Running)
+        {
+            // read next command from user or queue
+            var cmd = input.ReadCommand();
 
-            Console.CancelKeyPress += (o, e) => { e.Cancel = true; env.Running = false; };
-
-            while (input.Running)
+            if (string.IsNullOrEmpty(cmd))
             {
-                // read next command from user or queue
-                var cmd = input.ReadCommand();
+                continue;
+            }
 
-                if (string.IsNullOrEmpty(cmd)) continue;
+            try
+            {
+                var scmd = GetCommand(cmd);
 
-                try
+                if (scmd != null)
                 {
-                    var scmd = GetCommand(cmd);
+                    scmd(env);
 
-                    if (scmd != null)
-                    {
-                        scmd(env);
-                        continue;
-                    }
-
-                    // if string is not a shell command, try execute as sql command
-                    if (env.Database == null) throw new Exception("Database not connected");
-
-                    env.Running = true;
-
-                    display.WriteResult(env.Database.Execute(cmd), env);
-
+                    continue;
                 }
-                catch (Exception ex)
+
+                // if string is not a shell command, try execute as sql command
+                if (env.Database == null)
                 {
-                    display.WriteError(ex);
+                    throw new Exception("Database not connected");
                 }
+
+                env.Running = true;
+
+                display.WriteResult(env.Database.Execute(cmd), env);
             }
-        }
-
-        #region Shell Commands
-
-        private static readonly List<IShellCommand> _commands = new List<IShellCommand>();
-
-        static ShellProgram()
-        {
-            var type = typeof(IShellCommand);
-            var types = typeof(ShellProgram).Assembly
-                .GetTypes()
-                .Where(p => type.IsAssignableFrom(p) && p.IsClass);
-
-            foreach (var cmd in types)
+            catch (Exception ex)
             {
-                _commands.Add(Activator.CreateInstance(cmd) as IShellCommand);
+                display.WriteError(ex);
             }
         }
-
-        public static Action<Env> GetCommand(string cmd)
-        {
-            var s = new StringScanner(cmd);
-
-            // first test all shell app commands
-            foreach (var command in _commands)
-            {
-                if (!command.IsCommand(s)) continue;
-
-                return (env) => command.Execute(s, env);
-            }
-
-            return null;
-        }
-
-        #endregion
     }
+
+    #region Shell Commands
+
+    private static readonly List<IShellCommand> _commands = new();
+
+    static ShellProgram()
+    {
+        var type = typeof(IShellCommand);
+        var types = typeof(ShellProgram).Assembly
+                                        .GetTypes()
+                                        .Where(p => type.IsAssignableFrom(p) && p.IsClass);
+
+        foreach (var cmd in types)
+        {
+            _commands.Add(Activator.CreateInstance(cmd) as IShellCommand);
+        }
+    }
+
+    public static Action<Env> GetCommand(string cmd)
+    {
+        var s = new StringScanner(cmd);
+
+        // first test all shell app commands
+        foreach (var command in _commands)
+        {
+            if (!command.IsCommand(s))
+            {
+                continue;
+            }
+
+            return env => command.Execute(s, env);
+        }
+
+        return null;
+    }
+
+    #endregion
 }

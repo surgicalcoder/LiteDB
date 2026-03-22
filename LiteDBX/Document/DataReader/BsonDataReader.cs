@@ -1,152 +1,146 @@
-using LiteDB.Engine;
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
-using static LiteDB.Constants;
+using LiteDbX.Engine;
 
-namespace LiteDB
+namespace LiteDbX;
+
+/// <summary>
+/// Class to read void, one or a collection of BsonValues. Used in SQL execution commands and query returns. Use local data
+/// source (IEnumerable[BsonDocument])
+/// </summary>
+public class BsonDataReader : IBsonDataReader
 {
+    private readonly IEnumerator<BsonValue> _source;
+    private readonly EngineState _state;
+
+    private bool _disposed;
+    private bool _isFirst;
+
+
     /// <summary>
-    /// Class to read void, one or a collection of BsonValues. Used in SQL execution commands and query returns. Use local data source (IEnumerable[BsonDocument])
+    /// Initialize with no value
     /// </summary>
-    public class BsonDataReader : IBsonDataReader
+    internal BsonDataReader()
     {
-        private readonly IEnumerator<BsonValue> _source = null;
-        private readonly EngineState _state = null;
-        private readonly string _collection = null;
-        private readonly bool _hasValues;
+        HasValues = false;
+    }
 
-        private BsonValue _current = null;
-        private bool _isFirst;
-        private bool _disposed = false;
+    /// <summary>
+    /// Initialize with a single value
+    /// </summary>
+    internal BsonDataReader(BsonValue value, string collection = null)
+    {
+        Current = value;
+        _isFirst = HasValues = true;
+        Collection = collection;
+    }
 
+    /// <summary>
+    /// Initialize with an IEnumerable data source
+    /// </summary>
+    internal BsonDataReader(IEnumerable<BsonValue> values, string collection, EngineState state)
+    {
+        Collection = collection;
+        _source = values.GetEnumerator();
+        _state = state;
 
-        /// <summary>
-        /// Initialize with no value
-        /// </summary>
-        internal BsonDataReader()
+        try
         {
-            _hasValues = false;
+            _state.Validate();
+
+            if (_source.MoveNext())
+            {
+                HasValues = _isFirst = true;
+                Current = _state.ReadTransform(Collection, _source.Current);
+            }
+        }
+        catch (Exception ex)
+        {
+            _state.Handle(ex);
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Return if has any value in result
+    /// </summary>
+    public bool HasValues { get; }
+
+    /// <summary>
+    /// Return current value
+    /// </summary>
+    public BsonValue Current { get; private set; }
+
+    /// <summary>
+    /// Return collection name
+    /// </summary>
+    public string Collection { get; }
+
+    /// <summary>
+    /// Move cursor to next result. Returns true if read was possible
+    /// </summary>
+    public bool Read()
+    {
+        if (!HasValues)
+        {
+            return false;
         }
 
-        /// <summary>
-        /// Initialize with a single value
-        /// </summary>
-        internal BsonDataReader(BsonValue value, string collection = null)
+        if (_isFirst)
         {
-            _current = value;
-            _isFirst = _hasValues = true;
-            _collection = collection;
+            _isFirst = false;
+
+            return true;
         }
 
-        /// <summary>
-        /// Initialize with an IEnumerable data source
-        /// </summary>
-        internal BsonDataReader(IEnumerable<BsonValue> values, string collection, EngineState state)
+        if (_source != null)
         {
-            _collection = collection;
-            _source = values.GetEnumerator();
-            _state = state;
+            _state.Validate(); // checks if engine still open
 
             try
             {
-                _state.Validate();
+                var read = _source.MoveNext(); // can throw any error here
+                Current = _state.ReadTransform(Collection, _source.Current);
 
-                if (_source.MoveNext())
-                {
-                    _hasValues = _isFirst = true;
-                    _current = _state.ReadTransform(_collection, _source.Current);
-                }
+                return read;
             }
             catch (Exception ex)
             {
                 _state.Handle(ex);
-                throw;
+
+                throw ex;
             }
         }
 
-        /// <summary>
-        /// Return if has any value in result
-        /// </summary>
-        public bool HasValues => _hasValues;
+        return false;
+    }
 
-        /// <summary>
-        /// Return current value
-        /// </summary>
-        public BsonValue Current => _current;
+    public BsonValue this[string field] => Current.AsDocument[field] ?? BsonValue.Null;
 
-        /// <summary>
-        /// Return collection name
-        /// </summary>
-        public string Collection => _collection;
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
 
-        /// <summary>
-        /// Move cursor to next result. Returns true if read was possible
-        /// </summary>
-        public bool Read()
+    ~BsonDataReader()
+    {
+        Dispose(false);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
         {
-            if (!_hasValues) return false;
-
-            if (_isFirst)
-            {
-                _isFirst = false;
-                return true;
-            }
-            else
-            {
-                if (_source != null)
-                {
-                    _state.Validate(); // checks if engine still open
-
-                    try
-                    {
-                        var read = _source.MoveNext(); // can throw any error here
-                        _current = _state.ReadTransform(_collection, _source.Current);
-                        return read;
-                    }
-                    catch (Exception ex)
-                    {
-                        _state.Handle(ex);
-                        throw ex;
-                    }
-                }
-                else
-                {
-                    return false;
-                }
-            }
+            return;
         }
 
-        public BsonValue this[string field]
+        _disposed = true;
+
+        if (disposing)
         {
-            get
-            {
-                return _current.AsDocument[field] ?? BsonValue.Null;
-            }
-        }
-
-        public void Dispose()
-        {
-            this.Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        ~BsonDataReader()
-        {
-            this.Dispose(false);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (_disposed) return;
-
-            _disposed = true;
-
-            if (disposing)
-            {
-                _source?.Dispose();
-            }
+            _source?.Dispose();
         }
     }
 }

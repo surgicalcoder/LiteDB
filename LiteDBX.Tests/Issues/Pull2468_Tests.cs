@@ -1,16 +1,8 @@
-﻿using FluentAssertions;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
+﻿using System;
 using Xunit;
+using static LiteDbX.Tests.Issues.Issue1838_Tests;
 
-using static LiteDB.Tests.Issues.Issue1838_Tests;
-
-namespace LiteDB.Tests.Issues;
+namespace LiteDbX.Tests.Issues;
 
 public class Pull2468_Tests
 {
@@ -21,21 +13,21 @@ public class Pull2468_Tests
         using var db = new LiteDatabase(":memory:");
         var collection = db.GetCollection<TestType>(nameof(TestType));
 
-        collection.Insert(new TestType()
+        collection.Insert(new TestType
         {
             Foo = "Abc",
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = DateTimeOffset.UtcNow
         });
 
-        collection.Insert(new TestType()
+        collection.Insert(new TestType
         {
             Foo = "Def",
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = DateTimeOffset.UtcNow
         });
 
         var result = collection.Query()
-            .Where(x => x.Foo.ToLowerInvariant() == "abc")
-            .ToList();
+                               .Where(x => x.Foo.ToLowerInvariant() == "abc")
+                               .ToList();
 
         Assert.NotNull(result);
         Assert.Single(result);
@@ -48,21 +40,21 @@ public class Pull2468_Tests
         using var db = new LiteDatabase(":memory:");
         var collection = db.GetCollection<TestType>(nameof(TestType));
 
-        collection.Insert(new TestType()
+        collection.Insert(new TestType
         {
             Foo = "Abc",
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = DateTimeOffset.UtcNow
         });
 
-        collection.Insert(new TestType()
+        collection.Insert(new TestType
         {
             Foo = "Def",
-            Timestamp = DateTimeOffset.UtcNow,
+            Timestamp = DateTimeOffset.UtcNow
         });
 
         var result = collection.Query()
-            .Where(x => x.Foo.ToUpperInvariant() == "ABC")
-            .ToList();
+                               .Where(x => x.Foo.ToUpperInvariant() == "ABC")
+                               .ToList();
 
         Assert.NotNull(result);
         Assert.Single(result);

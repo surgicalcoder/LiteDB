@@ -1,17 +1,14 @@
-﻿using FluentAssertions;
-using LiteDB.Engine;
-using System;
-using System.IO;
+﻿using System;
 using System.Linq;
-
+using FluentAssertions;
+using LiteDbX.Engine;
 using Xunit;
 
 #if DEBUG
-namespace LiteDB.Tests.Engine
+namespace LiteDbX.Tests.Engine
 {
     public class Rebuild_Crash_Tests
     {
-
         [Fact]
         public void Rebuild_Crash_IO_Write_Error()
         {
@@ -39,7 +36,7 @@ namespace LiteDB.Tests.Engine
                 {
                     using (var db = new LiteEngine(settings))
                     {
-                        db.SimulateDiskWriteFail = (page) =>
+                        db.SimulateDiskWriteFail = page =>
                         {
                             var p = new BasePage(page);
 
@@ -84,7 +81,6 @@ namespace LiteDB.Tests.Engine
                     col1.Should().Be(N - 1);
                     col2.Should().Be(N);
                     errors.Should().Be(1);
-
                 }
             }
         }

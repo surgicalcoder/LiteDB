@@ -1,147 +1,139 @@
 ﻿using System;
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading;
-using static LiteDB.Constants;
+using static LiteDbX.Constants;
 
-namespace LiteDB.Engine
+namespace LiteDbX.Engine;
+
+internal class SortContainer : IDisposable
 {
-    internal class SortContainer : IDisposable
+    private static readonly ArrayPool<byte> _bufferPool = ArrayPool<byte>.Shared;
+    private readonly Collation _collation;
+    private readonly int _size;
+
+    private BufferReader _reader;
+
+    private int _readPosition;
+
+    private int _remaining;
+
+    /// <summary>
+    /// Get current/last read value in container
+    /// </summary>
+    public KeyValuePair<BsonValue, PageAddress> Current;
+
+    public SortContainer(Collation collation, int size)
     {
-        private readonly Collation _collation;
-        private readonly int _size;
+        _collation = collation;
+        _size = size;
+    }
 
-        private int _remaining = 0;
-        private int _count = 0;
-        private bool _isEOF = false;
+    /// <summary>
+    /// Returns if current container has no more items to read
+    /// </summary>
+    public bool IsEOF { get; private set; }
 
-        private int _readPosition = 0;
+    /// <summary>
+    /// Get container disk position
+    /// </summary>
+    public long Position { get; set; } = -1;
 
-        private BufferReader _reader = null;
+    /// <summary>
+    /// Get how many keyValues this container contains
+    /// </summary>
+    public int Count { get; private set; }
 
-        private static readonly ArrayPool<byte> _bufferPool = ArrayPool<byte>.Shared;
+    public void Dispose()
+    {
+        _reader?.Dispose();
+    }
 
-        /// <summary>
-        /// Returns if current container has no more items to read
-        /// </summary>
-        public bool IsEOF => _isEOF;
+    public void Insert(IEnumerable<KeyValuePair<BsonValue, PageAddress>> items, int order, BufferSlice buffer)
+    {
+        var query = order == Query.Ascending ? items.OrderBy(x => x.Key, _collation) : items.OrderByDescending(x => x.Key, _collation);
 
-        /// <summary>
-        /// Get current/last read value in container
-        /// </summary>
-        public KeyValuePair<BsonValue, PageAddress> Current;
+        var offset = 0;
 
-        /// <summary>
-        /// Get container disk position
-        /// </summary>
-        public long Position { get; set; } = -1;
-
-        /// <summary>
-        /// Get how many keyValues this container contains
-        /// </summary>
-        public int Count => _count;
-
-        public SortContainer(Collation collation, int size)
+        foreach (var item in query)
         {
-            _collation = collation;
-            _size = size;
-        }
+            buffer.WriteIndexKey(item.Key, offset);
 
-        public void Insert(IEnumerable<KeyValuePair<BsonValue, PageAddress>> items, int order, BufferSlice buffer)
-        {
-            var query = order == Query.Ascending ?
-                items.OrderBy(x => x.Key, _collation) : items.OrderByDescending(x => x.Key, _collation);
+            var keyLength = IndexNode.GetKeyLength(item.Key, false);
 
-            var offset = 0;
-
-            foreach(var item in query)
+            if (keyLength > MAX_INDEX_KEY_LENGTH)
             {
-                buffer.WriteIndexKey(item.Key, offset);
-
-                var keyLength = IndexNode.GetKeyLength(item.Key, false);
-
-                if (keyLength > MAX_INDEX_KEY_LENGTH) throw LiteException.InvalidIndexKey($"Sort key must be less than {MAX_INDEX_KEY_LENGTH} bytes.");
-
-                offset += keyLength;
-
-                buffer.Write(item.Value, offset);
-
-                offset += PageAddress.SIZE;
-
-                _remaining++;
+                throw LiteException.InvalidIndexKey($"Sort key must be less than {MAX_INDEX_KEY_LENGTH} bytes.");
             }
 
-            _count = _remaining;
+            offset += keyLength;
+
+            buffer.Write(item.Value, offset);
+
+            offset += PageAddress.SIZE;
+
+            _remaining++;
         }
 
-        /// <summary>
-        /// Initialize reader based on Stream (if data was persisted in disk) or Buffer (if all data fit in only 1 container)
-        /// </summary>
-        public void InitializeReader(Stream stream, BufferSlice buffer, bool utcDate)
+        Count = _remaining;
+    }
+
+    /// <summary>
+    /// Initialize reader based on Stream (if data was persisted in disk) or Buffer (if all data fit in only 1 container)
+    /// </summary>
+    public void InitializeReader(Stream stream, BufferSlice buffer, bool utcDate)
+    {
+        if (stream != null)
         {
-            if (stream != null)
-            {
-                _reader = new BufferReader(this.GetSourceFromStream(stream), utcDate);
-            }
-            else
-            {
-                _reader = new BufferReader(buffer, utcDate);
-            }
-
-            this.MoveNext();
+            _reader = new BufferReader(GetSourceFromStream(stream), utcDate);
         }
-
-        public bool MoveNext()
+        else
         {
-            if (_remaining == 0)
-            {
-                _isEOF = true;
-                return false;
-            }
-
-            var key = _reader.ReadIndexKey();
-            var value = _reader.ReadPageAddress();
-
-            this.Current = new KeyValuePair<BsonValue, PageAddress>(key, value);
-
-            _remaining--;
-
-            return true;
+            _reader = new BufferReader(buffer, utcDate);
         }
 
-        /// <summary>
-        /// Get 8k buffer slices inside file container
-        /// </summary>
-        private IEnumerable<BufferSlice> GetSourceFromStream(Stream stream)
+        MoveNext();
+    }
+
+    public bool MoveNext()
+    {
+        if (_remaining == 0)
         {
-            var bytes = _bufferPool.Rent(PAGE_SIZE);
-            var buffer = new BufferSlice(bytes, 0, PAGE_SIZE);
+            IsEOF = true;
 
-            while (_readPosition < _size)
-            {
-                stream.Position = this.Position + _readPosition;
-
-                stream.Read(bytes, 0, PAGE_SIZE);
-
-                _readPosition += PAGE_SIZE;
-
-                yield return buffer;
-            }
-
-            _bufferPool.Return(bytes, true);
+            return false;
         }
 
-        public void Dispose()
+        var key = _reader.ReadIndexKey();
+        var value = _reader.ReadPageAddress();
+
+        Current = new KeyValuePair<BsonValue, PageAddress>(key, value);
+
+        _remaining--;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Get 8k buffer slices inside file container
+    /// </summary>
+    private IEnumerable<BufferSlice> GetSourceFromStream(Stream stream)
+    {
+        var bytes = _bufferPool.Rent(PAGE_SIZE);
+        var buffer = new BufferSlice(bytes, 0, PAGE_SIZE);
+
+        while (_readPosition < _size)
         {
-            _reader?.Dispose();
+            stream.Position = Position + _readPosition;
+
+            stream.Read(bytes, 0, PAGE_SIZE);
+
+            _readPosition += PAGE_SIZE;
+
+            yield return buffer;
         }
+
+        _bufferPool.Return(bytes, true);
     }
 }

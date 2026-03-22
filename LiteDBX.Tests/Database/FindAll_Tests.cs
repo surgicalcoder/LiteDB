@@ -1,47 +1,43 @@
-﻿using System;
-using System.IO;
-using System.Linq;
+﻿using System.Linq;
 using FluentAssertions;
 using Xunit;
 
-namespace LiteDB.Tests.Database
+namespace LiteDbX.Tests.Database;
+
+public class FindAll_Tests
 {
-    public class FindAll_Tests
+    [Fact]
+    public void FindAll()
     {
-        #region Model
-
-        public class Person
+        using (var f = new TempFile())
         {
-            public int Id { get; set; }
-            public string Fullname { get; set; }
-        }
-
-        #endregion
-
-        [Fact]
-        public void FindAll()
-        {
-            using (var f = new TempFile())
+            using (var db = new LiteDatabase(f.Filename))
             {
-                using (var db = new LiteDatabase(f.Filename))
-                {
-                    var col = db.GetCollection<Person>("Person");
+                var col = db.GetCollection<Person>("Person");
 
-                    col.Insert(new Person { Fullname = "John" });
-                    col.Insert(new Person { Fullname = "Doe" });
-                    col.Insert(new Person { Fullname = "Joana" });
-                    col.Insert(new Person { Fullname = "Marcus" });
-                }
-                // close datafile
-
-                using (var db = new LiteDatabase(f.Filename))
-                {
-                    var p = db.GetCollection<Person>("Person").Find(Query.All("Fullname", Query.Ascending));
-
-                    p.Count().Should().Be(4);
-                }
+                col.Insert(new Person { Fullname = "John" });
+                col.Insert(new Person { Fullname = "Doe" });
+                col.Insert(new Person { Fullname = "Joana" });
+                col.Insert(new Person { Fullname = "Marcus" });
             }
+            // close datafile
 
+            using (var db = new LiteDatabase(f.Filename))
+            {
+                var p = db.GetCollection<Person>("Person").Find(Query.All("Fullname"));
+
+                p.Count().Should().Be(4);
+            }
         }
     }
+
+    #region Model
+
+    public class Person
+    {
+        public int Id { get; set; }
+        public string Fullname { get; set; }
+    }
+
+    #endregion
 }

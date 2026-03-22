@@ -2,117 +2,119 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using BenchmarkDotNet.Attributes;
-using LiteDB.Benchmarks.Models;
-using LiteDB.Benchmarks.Models.Generators;
+using LiteDbX.Benchmarks.Models;
+using LiteDbX.Benchmarks.Models.Generators;
 
-namespace LiteDB.Benchmarks.Benchmarks.Insertion
+namespace LiteDbX.Benchmarks.Benchmarks.Insertion
 {
-	[BenchmarkCategory(Constants.Categories.INSERTION)]
-	public class InsertionInMemoryBenchmark : BenchmarkBase
-	{
-		private List<FileMetaBase> _data;
+    [BenchmarkCategory(Constants.Categories.INSERTION)]
+    public class InsertionInMemoryBenchmark : BenchmarkBase
+    {
+        private List<FileMetaBase> _data;
+        private ILiteDatabase _databaseInstanceInMemory;
 
-		private ILiteDatabase _databaseInstanceNormal;
-		private ILiteDatabase _databaseInstanceInMemory;
-		private ILiteCollection<FileMetaBase> _fileMetaNormalCollection;
-		private ILiteCollection<FileMetaBase> _fileMetaInMemoryCollection;
+        private ILiteDatabase _databaseInstanceNormal;
+        private ILiteCollection<FileMetaBase> _fileMetaInMemoryCollection;
+        private ILiteCollection<FileMetaBase> _fileMetaNormalCollection;
 
-		[GlobalSetup(Target = nameof(InsertionNormal))]
-		public void GlobalSetupNormal()
-		{
-			File.Delete(DatabasePath);
+        [GlobalSetup(Target = nameof(InsertionNormal))]
+        public void GlobalSetupNormal()
+        {
+            File.Delete(DatabasePath);
 
-			_data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize); // executed once per each N value
+            _data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize); // executed once per each N value
 
-			_databaseInstanceNormal = new LiteDatabase(ConnectionString());
-			_fileMetaNormalCollection = _databaseInstanceNormal.GetCollection<FileMetaBase>();
-		}
+            _databaseInstanceNormal = new LiteDatabase(ConnectionString());
+            _fileMetaNormalCollection = _databaseInstanceNormal.GetCollection<FileMetaBase>();
+        }
 
-		[GlobalSetup(Target = nameof(InsertionInMemory))]
-		public void GlobalSetupInMemory()
-		{
-			_data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize); // executed once per each N value
+        [GlobalSetup(Target = nameof(InsertionInMemory))]
+        public void GlobalSetupInMemory()
+        {
+            _data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize); // executed once per each N value
 
-			_databaseInstanceInMemory = new LiteDatabase(new MemoryStream());
-			_fileMetaInMemoryCollection = _databaseInstanceInMemory.GetCollection<FileMetaBase>();
-		}
+            _databaseInstanceInMemory = new LiteDatabase(new MemoryStream());
+            _fileMetaInMemoryCollection = _databaseInstanceInMemory.GetCollection<FileMetaBase>();
+        }
 
-		[Benchmark(Baseline = true)]
-		public int InsertionNormal()
-		{
-			var count = _fileMetaNormalCollection.Insert(_data);
-			_databaseInstanceNormal.Checkpoint();
-			return count;
-		}
+        [Benchmark(Baseline = true)]
+        public int InsertionNormal()
+        {
+            var count = _fileMetaNormalCollection.Insert(_data);
+            _databaseInstanceNormal.Checkpoint();
 
-		[Benchmark]
-		public int InsertionInMemory()
-		{
-			var count = _fileMetaInMemoryCollection.Insert(_data);
-			_databaseInstanceNormal.Checkpoint();
-			return count;
-		}
+            return count;
+        }
 
-		[IterationCleanup(Target = nameof(InsertionNormal))]
-		public void CleanUpNormal()
-		{
-			const string collectionName = nameof(FileMetaBase);
+        [Benchmark]
+        public int InsertionInMemory()
+        {
+            var count = _fileMetaInMemoryCollection.Insert(_data);
+            _databaseInstanceNormal.Checkpoint();
 
-			var indexesCollection = _databaseInstanceNormal.GetCollection("$indexes");
-			var droppedCollectionIndexes = indexesCollection.Query().Where(x => x["collection"] == collectionName && x["name"] != "_id").ToDocuments().ToList();
+            return count;
+        }
 
-			_databaseInstanceNormal.DropCollection(collectionName);
+        [IterationCleanup(Target = nameof(InsertionNormal))]
+        public void CleanUpNormal()
+        {
+            const string collectionName = nameof(FileMetaBase);
 
-			foreach (var indexInfo in droppedCollectionIndexes)
-			{
-				_databaseInstanceNormal.GetCollection(collectionName)
-					.EnsureIndex(indexInfo["name"], BsonExpression.Create(indexInfo["expression"]), indexInfo["unique"]);
-			}
+            var indexesCollection = _databaseInstanceNormal.GetCollection("$indexes");
+            var droppedCollectionIndexes = indexesCollection.Query().Where(x => x["collection"] == collectionName && x["name"] != "_id").ToDocuments().ToList();
 
-			_databaseInstanceNormal.Checkpoint();
-			_databaseInstanceNormal.Rebuild();
-		}
+            _databaseInstanceNormal.DropCollection(collectionName);
 
-		[IterationCleanup(Target = nameof(InsertionInMemory))]
-		public void CleanUpInMemory()
-		{
-			const string collectionName = nameof(FileMetaBase);
+            foreach (var indexInfo in droppedCollectionIndexes)
+            {
+                _databaseInstanceNormal.GetCollection(collectionName)
+                                       .EnsureIndex(indexInfo["name"], BsonExpression.Create(indexInfo["expression"]), indexInfo["unique"]);
+            }
 
-			var indexesCollection = _databaseInstanceInMemory.GetCollection("$indexes");
-			var droppedCollectionIndexes = indexesCollection.Query().Where(x => x["collection"] == collectionName && x["name"] != "_id").ToDocuments().ToList();
+            _databaseInstanceNormal.Checkpoint();
+            _databaseInstanceNormal.Rebuild();
+        }
 
-			_databaseInstanceInMemory.DropCollection(collectionName);
+        [IterationCleanup(Target = nameof(InsertionInMemory))]
+        public void CleanUpInMemory()
+        {
+            const string collectionName = nameof(FileMetaBase);
 
-			foreach (var indexInfo in droppedCollectionIndexes)
-			{
-				_databaseInstanceInMemory.GetCollection(collectionName)
-					.EnsureIndex(indexInfo["name"], BsonExpression.Create(indexInfo["expression"]), indexInfo["unique"]);
-			}
+            var indexesCollection = _databaseInstanceInMemory.GetCollection("$indexes");
+            var droppedCollectionIndexes = indexesCollection.Query().Where(x => x["collection"] == collectionName && x["name"] != "_id").ToDocuments().ToList();
 
-			_databaseInstanceInMemory.Checkpoint();
-			_databaseInstanceInMemory.Rebuild();
-		}
+            _databaseInstanceInMemory.DropCollection(collectionName);
 
-		[GlobalCleanup(Target = nameof(InsertionNormal))]
-		public void GlobalCleanupNormal()
-		{
-			_fileMetaNormalCollection = null;
+            foreach (var indexInfo in droppedCollectionIndexes)
+            {
+                _databaseInstanceInMemory.GetCollection(collectionName)
+                                         .EnsureIndex(indexInfo["name"], BsonExpression.Create(indexInfo["expression"]), indexInfo["unique"]);
+            }
 
-			_databaseInstanceNormal?.Checkpoint();
-			_databaseInstanceNormal?.Dispose();
-			_databaseInstanceNormal = null;
+            _databaseInstanceInMemory.Checkpoint();
+            _databaseInstanceInMemory.Rebuild();
+        }
 
-			File.Delete(DatabasePath);
-		}
+        [GlobalCleanup(Target = nameof(InsertionNormal))]
+        public void GlobalCleanupNormal()
+        {
+            _fileMetaNormalCollection = null;
 
-		[GlobalCleanup(Target = nameof(InsertionInMemory))]
-		public void GlobalCleanupInMemory()
-		{
-			_fileMetaInMemoryCollection = null;
+            _databaseInstanceNormal?.Checkpoint();
+            _databaseInstanceNormal?.Dispose();
+            _databaseInstanceNormal = null;
 
-			_databaseInstanceInMemory?.Checkpoint();
-			_databaseInstanceInMemory?.Dispose();
-			_databaseInstanceInMemory = null;
-		}
-	}
+            File.Delete(DatabasePath);
+        }
+
+        [GlobalCleanup(Target = nameof(InsertionInMemory))]
+        public void GlobalCleanupInMemory()
+        {
+            _fileMetaInMemoryCollection = null;
+
+            _databaseInstanceInMemory?.Checkpoint();
+            _databaseInstanceInMemory?.Dispose();
+            _databaseInstanceInMemory = null;
+        }
+    }
 }

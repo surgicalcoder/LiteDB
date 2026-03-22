@@ -1,42 +1,55 @@
-﻿using LiteDB.Engine;
-using System;
-using System.Collections;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
-using static LiteDB.Constants;
 
-namespace LiteDB
+namespace LiteDbX;
+
+/// <summary>
+/// Implement some Enumerable methods to IBsonDataReader
+/// </summary>
+public static class BsonDataReaderExtensions
 {
-    /// <summary>
-    /// Implement some Enumerable methods to IBsonDataReader
-    /// </summary>
-    public static class BsonDataReaderExtensions
+    public static IEnumerable<BsonValue> ToEnumerable(this IBsonDataReader reader)
     {
-        public static IEnumerable<BsonValue> ToEnumerable(this IBsonDataReader reader)
+        try
         {
-            try
+            while (reader.Read())
             {
-                while (reader.Read())
-                {
-                    yield return reader.Current;
-                }
-            }
-            finally
-            {
-                reader.Dispose();
+                yield return reader.Current;
             }
         }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
 
-        public static BsonValue[] ToArray(this IBsonDataReader reader) => ToEnumerable(reader).ToArray();
+    public static BsonValue[] ToArray(this IBsonDataReader reader)
+    {
+        return ToEnumerable(reader).ToArray();
+    }
 
-        public static IList<BsonValue> ToList(this IBsonDataReader reader) => ToEnumerable(reader).ToList();
+    public static IList<BsonValue> ToList(this IBsonDataReader reader)
+    {
+        return ToEnumerable(reader).ToList();
+    }
 
-        public static BsonValue First(this IBsonDataReader reader) => ToEnumerable(reader).First();
+    public static BsonValue First(this IBsonDataReader reader)
+    {
+        return ToEnumerable(reader).First();
+    }
 
-        public static BsonValue FirstOrDefault(this IBsonDataReader reader) => ToEnumerable(reader).FirstOrDefault();
+    public static BsonValue FirstOrDefault(this IBsonDataReader reader)
+    {
+        return ToEnumerable(reader).FirstOrDefault();
+    }
 
-        public static BsonValue Single(this IBsonDataReader reader) => ToEnumerable(reader).Single();
+    public static BsonValue Single(this IBsonDataReader reader)
+    {
+        return ToEnumerable(reader).Single();
+    }
 
-        public static BsonValue SingleOrDefault(this IBsonDataReader reader) => ToEnumerable(reader).SingleOrDefault();
+    public static BsonValue SingleOrDefault(this IBsonDataReader reader)
+    {
+        return ToEnumerable(reader).SingleOrDefault();
     }
 }

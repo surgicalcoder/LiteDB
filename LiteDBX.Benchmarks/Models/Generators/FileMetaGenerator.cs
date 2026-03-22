@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace LiteDB.Benchmarks.Models.Generators
+namespace LiteDbX.Benchmarks.Models.Generators
 {
     public static class FileMetaGenerator<T> where T : FileMetaBase, new()
     {
@@ -10,7 +10,7 @@ namespace LiteDB.Benchmarks.Models.Generators
         private static T Generate()
         {
             var docGuid = Guid.NewGuid();
-            
+
             var generatedFileMeta = new T
             {
                 FileId = docGuid,
@@ -35,7 +35,11 @@ namespace LiteDB.Benchmarks.Models.Generators
             _random = new Random(0);
 
             var generatedList = new List<T>();
-            for (var i = 0; i < amountToGenerate; i++) generatedList.Add(Generate());
+
+            for (var i = 0; i < amountToGenerate; i++)
+            {
+                generatedList.Add(Generate());
+            }
 
             foreach (var fileMeta in generatedList)
             {

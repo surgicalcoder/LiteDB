@@ -1,23 +1,10 @@
 ﻿using FluentAssertions;
-
-using System.Diagnostics;
-
 using Xunit;
 
-namespace LiteDB.Tests.Issues;
+namespace LiteDbX.Tests.Issues;
 
 public class Issue2487_tests
 {
-    private class DataClass
-    {
-        [BsonId]
-        public int Id { get; set; }
-
-        public string Foo { get; set; }
-
-        public string Bar { get; set; }
-    }
-
     [Fact]
     public void Test_Contains_EmptyStrings()
     {
@@ -41,5 +28,15 @@ public class Issue2487_tests
 
         var shouldExecute = () => engine.Query("data", Query.All(Query.Contains("Foo", " ")));
         shouldExecute.Should().NotThrow();
+    }
+
+    private class DataClass
+    {
+        [BsonId]
+        public int Id { get; set; }
+
+        public string Foo { get; set; }
+
+        public string Bar { get; set; }
     }
 }

@@ -1,19 +1,19 @@
 ﻿using Xunit;
 
-namespace LiteDB.Tests.Issues;
+namespace LiteDbX.Tests.Issues;
 
 public class Issue2534_Tests
 {
     [Fact]
-    public void Test() 
+    public void Test()
     {
-        using LiteDatabase database = new(new ConnectionString()
+        using LiteDatabase database = new(new ConnectionString
         {
             Filename = "Demo.db",
-            Connection = ConnectionType.Shared,
+            Connection = ConnectionType.Shared
         });
 
-        ILiteCollection<BsonDocument> accounts = database.GetCollection("Issue2534");
+        var accounts = database.GetCollection("Issue2534");
 
         if (accounts.Count() < 3)
         {
@@ -22,7 +22,7 @@ public class Issue2534_Tests
             accounts.Insert(new BsonDocument());
         }
 
-        foreach (BsonDocument document in accounts.FindAll())
+        foreach (var document in accounts.FindAll())
         {
             accounts.Update(document);
         }

@@ -1,97 +1,99 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text.RegularExpressions;
 
-namespace LiteDB.Shell
+namespace LiteDbX.Shell;
+
+internal class Display
 {
-    internal class Display
+    public Display()
     {
-        public bool Pretty { get; set; }
+        Pretty = false;
+    }
 
-        public Display()
+    public bool Pretty { get; set; }
+
+    public void WriteWelcome()
+    {
+        WriteInfo("Welcome to LiteDBX Shell");
+        WriteInfo("");
+        WriteInfo("Getting started with `help`");
+        WriteInfo("");
+    }
+
+    public void WritePrompt(string text)
+    {
+        Write(ConsoleColor.White, text);
+    }
+
+    public void WriteInfo(string text)
+    {
+        WriteLine(ConsoleColor.Gray, text);
+    }
+
+    public void WriteError(Exception ex)
+    {
+        WriteLine(ConsoleColor.Red, ex.Message);
+
+        if (ex is LiteException && (ex as LiteException).ErrorCode == LiteException.UNEXPECTED_TOKEN)
         {
-            this.Pretty = false;
+            var err = ex as LiteException;
+
+            WriteLine(ConsoleColor.DarkYellow, "> " + "^".PadLeft((int)err.Position + 1, ' '));
         }
+    }
 
-        public void WriteWelcome()
+    public void WriteResult(IBsonDataReader result, Env env)
+    {
+        var index = 0;
+        var writer = new JsonWriter(Console.Out)
         {
-            this.WriteInfo("Welcome to LiteDBX Shell");
-            this.WriteInfo("");
-            this.WriteInfo("Getting started with `help`");
-            this.WriteInfo("");
-        }
+            Pretty = Pretty,
+            Indent = 2
+        };
 
-        public void WritePrompt(string text)
+        foreach (var item in result.ToEnumerable())
         {
-            this.Write(ConsoleColor.White, text);
-        }
-
-        public void WriteInfo(string text)
-        {
-            this.WriteLine(ConsoleColor.Gray, text);
-        }
-
-        public void WriteError(Exception ex)
-        {
-            this.WriteLine(ConsoleColor.Red, ex.Message);
-
-            if (ex is LiteException && (ex as LiteException).ErrorCode == LiteException.UNEXPECTED_TOKEN)
+            if (!env.Running)
             {
-                var err = ex as LiteException;
-
-                this.WriteLine(ConsoleColor.DarkYellow, "> " + "^".PadLeft((int)err.Position + 1, ' '));
+                return;
             }
-        }
 
-        public void WriteResult(IBsonDataReader result, Env env)
-        {
-            var index = 0;
-            var writer = new JsonWriter(Console.Out)
+            Write(ConsoleColor.Cyan, string.Format("[{0}]: ", ++index));
+
+            if (Pretty)
             {
-                Pretty = this.Pretty,
-                Indent = 2
-            };
-
-            foreach (var item in result.ToEnumerable())
-            {
-                if (env.Running == false) return;
-
-                this.Write(ConsoleColor.Cyan, string.Format("[{0}]: ", ++index));
-
-                if (this.Pretty) Console.WriteLine();
-
-                Console.ForegroundColor = ConsoleColor.DarkCyan;
-
-                writer.Serialize(item);
-
                 Console.WriteLine();
             }
+
+            Console.ForegroundColor = ConsoleColor.DarkCyan;
+
+            writer.Serialize(item);
+
+            Console.WriteLine();
         }
-
-        #region Print public methods
-
-        public void Write(string text)
-        {
-            this.Write(Console.ForegroundColor, text);
-        }
-
-        public void WriteLine(string text)
-        {
-            this.WriteLine(Console.ForegroundColor, text);
-        }
-
-        public void WriteLine(ConsoleColor color, string text)
-        {
-            this.Write(color, text + Environment.NewLine);
-        }
-
-        public void Write(ConsoleColor color, string text)
-        {
-            Console.ForegroundColor = color;
-            Console.Write(text);
-        }
-
-        #endregion
     }
+
+    #region Print public methods
+
+    public void Write(string text)
+    {
+        Write(Console.ForegroundColor, text);
+    }
+
+    public void WriteLine(string text)
+    {
+        WriteLine(Console.ForegroundColor, text);
+    }
+
+    public void WriteLine(ConsoleColor color, string text)
+    {
+        Write(color, text + Environment.NewLine);
+    }
+
+    public void Write(ConsoleColor color, string text)
+    {
+        Console.ForegroundColor = color;
+        Console.Write(text);
+    }
+
+    #endregion
 }

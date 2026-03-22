@@ -1,36 +1,34 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+﻿using System.Collections.Generic;
 using FluentAssertions;
-using LiteDB.Engine;
 using Xunit;
 
-namespace LiteDB.Tests.Issues
+namespace LiteDbX.Tests.Issues;
+
+public class Issue1695_Tests
 {
-    public class Issue1695_Tests
+    [Fact]
+    public void ICollection_Parameter_Test()
     {
-        public class StateModel
+        using var db = new LiteDatabase(":memory:");
+        var col = db.GetCollection<StateModel>("col");
+
+        ICollection<ObjectId> ids = new List<ObjectId>();
+
+        for (var i = 1; i <= 10; i++)
         {
-            [BsonId]
-            public ObjectId Id { get; set; }
+            ids.Add(col.Insert(new StateModel()));
         }
 
-        [Fact]
-        public void ICollection_Parameter_Test()
-        {
-            using var db = new LiteDatabase(":memory:");
-            var col = db.GetCollection<StateModel>("col");
+        var items = col.Query()
+                       .Where(x => ids.Contains(x.Id))
+                       .ToList();
 
-            ICollection<ObjectId> ids = new List<ObjectId>();
-            for (var i = 1; i <= 10; i++)
-                ids.Add(col.Insert(new StateModel()));
+        items.Should().HaveCount(10);
+    }
 
-            var items = col.Query()
-                .Where(x => ids.Contains(x.Id))
-                .ToList();
-
-            items.Should().HaveCount(10);
-        }
+    public class StateModel
+    {
+        [BsonId]
+        public ObjectId Id { get; set; }
     }
 }

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 
-namespace LiteDB;
+namespace LiteDbX;
 
 public partial class BsonMapper
 {
@@ -19,26 +19,29 @@ public partial class BsonMapper
     /// </summary>
     internal EntityMapper GetEntityMapper(Type type)
     {
-        if (_entities.TryGetValue(type, out EntityMapper mapper))
+        if (_entities.TryGetValue(type, out var mapper))
         {
             return mapper;
         }
 
         using var cts = new CancellationTokenSource();
+
         try
         {
             // We need to add the empty shell, because ``BuildEntityMapper`` may use this method recursively
             var newMapper = new EntityMapper(type, cts.Token);
             mapper = _entities.GetOrAdd(type, newMapper);
+
             if (ReferenceEquals(mapper, newMapper))
             {
                 try
                 {
-                    this.BuildEntityMapper(mapper);
+                    BuildEntityMapper(mapper);
                 }
                 catch (Exception ex)
                 {
                     _entities.TryRemove(type, out _);
+
                     throw new LiteException(LiteException.MAPPING_ERROR, $"Error in '{type.Name}' mapping: {ex.Message}", ex);
                 }
             }
@@ -63,20 +66,23 @@ public partial class BsonMapper
         var fieldAttr = typeof(BsonFieldAttribute);
         var dbrefAttr = typeof(BsonRefAttribute);
 
-        var members = this.GetTypeMembers(mapper.ForType);
-        var id = this.GetIdMember(members);
+        var members = GetTypeMembers(mapper.ForType);
+        var id = GetIdMember(members);
 
         foreach (var memberInfo in members)
         {
             // checks [BsonIgnore]
-            if (CustomAttributeExtensions.IsDefined(memberInfo, ignoreAttr, true)) continue;
+            if (CustomAttributeExtensions.IsDefined(memberInfo, ignoreAttr, true))
+            {
+                continue;
+            }
 
             // checks field name conversion
-            var name = this.ResolveFieldName(memberInfo.Name);
+            var name = ResolveFieldName(memberInfo.Name);
 
             // check if property has [BsonField]
             var field = (BsonFieldAttribute)CustomAttributeExtensions.GetCustomAttributes(memberInfo, fieldAttr, true)
-                .FirstOrDefault();
+                                                                     .FirstOrDefault();
 
             // check if property has [BsonField] with a custom field name
             if (field != null && field.Name != null)
@@ -96,7 +102,7 @@ public partial class BsonMapper
 
             // check if property has [BsonId] to get with was setted AutoId = true
             var autoId = (BsonIdAttribute)CustomAttributeExtensions.GetCustomAttributes(memberInfo, idAttr, true)
-                .FirstOrDefault();
+                                                                   .FirstOrDefault();
 
             // get data type
             var dataType = memberInfo is PropertyInfo
@@ -121,21 +127,21 @@ public partial class BsonMapper
 
             // check if property has [BsonRef]
             var dbRef = (BsonRefAttribute)CustomAttributeExtensions.GetCustomAttributes(memberInfo, dbrefAttr, false)
-                .FirstOrDefault();
+                                                                   .FirstOrDefault();
 
             if (dbRef != null && memberInfo is PropertyInfo)
             {
-                BsonMapper.RegisterDbRef(this, member, _typeNameBinder,
-                    dbRef.Collection ?? this.ResolveCollectionName((memberInfo as PropertyInfo).PropertyType));
+                RegisterDbRef(this, member, _typeNameBinder,
+                    dbRef.Collection ?? ResolveCollectionName((memberInfo as PropertyInfo).PropertyType));
             }
 
             // support callback to user modify member mapper
-            this.ResolveMember?.Invoke(mapper.ForType, memberInfo, member);
+            ResolveMember?.Invoke(mapper.ForType, memberInfo, member);
 
             // test if has name and there is no duplicate field
             // when member is not ignore
             if (member.FieldName != null &&
-                mapper.Members.Any(x => x.FieldName.Equals(name, StringComparison.OrdinalIgnoreCase)) == false &&
+                !mapper.Members.Any(x => x.FieldName.Equals(name, StringComparison.OrdinalIgnoreCase)) &&
                 !member.IsIgnore)
             {
                 mapper.Members.Add(member);
@@ -161,21 +167,21 @@ public partial class BsonMapper
     {
         var members = new List<MemberInfo>();
 
-        var flags = this.IncludeNonPublic
-            ? (BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-            : (BindingFlags.Public | BindingFlags.Instance);
+        var flags = IncludeNonPublic
+            ? BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
+            : BindingFlags.Public | BindingFlags.Instance;
 
         members.AddRange(type.GetProperties(flags)
-            .Where(x => x.CanRead && x.GetIndexParameters().Length == 0)
-            .Select(x => x as MemberInfo));
+                             .Where(x => x.CanRead && x.GetIndexParameters().Length == 0)
+                             .Select(x => x as MemberInfo));
 
         var shouldIncludeFields = members.Count == 0
                                   && type.GetTypeInfo().IsValueType;
-                                  
-        if (shouldIncludeFields || this.IncludeFields)
+
+        if (shouldIncludeFields || IncludeFields)
         {
-            members.AddRange(type.GetFields(flags).Where(x => !x.Name.EndsWith("k__BackingField") && x.IsStatic == false)
-                .Select(x => x as MemberInfo));
+            members.AddRange(type.GetFields(flags).Where(x => !x.Name.EndsWith("k__BackingField") && !x.IsStatic)
+                                 .Select(x => x as MemberInfo));
         }
 
         return members;
@@ -189,30 +195,36 @@ public partial class BsonMapper
     /// </summary>
     protected virtual CreateObject GetTypeCtor(EntityMapper mapper)
     {
-        Type type = mapper.ForType;
-        List<CreateObject> Mappings = new List<CreateObject>();
-        bool returnZeroParamNull = false;
-        foreach (ConstructorInfo ctor in type.GetConstructors())
+        var type = mapper.ForType;
+        var Mappings = new List<CreateObject>();
+        var returnZeroParamNull = false;
+
+        foreach (var ctor in type.GetConstructors())
         {
-            ParameterInfo[] pars = ctor.GetParameters();
+            var pars = ctor.GetParameters();
+
             // For 0 parameters, we can let the Reflection.CreateInstance handle it, unless they've specified a [BsonCtor] attribute on a different constructor.
             if (pars.Length == 0)
             {
                 returnZeroParamNull = true;
+
                 continue;
             }
 
-            KeyValuePair<string, Type>[] paramMap = new KeyValuePair<string, Type>[pars.Length];
+            var paramMap = new KeyValuePair<string, Type>[pars.Length];
             int i;
+
             for (i = 0; i < pars.Length; i++)
             {
-                ParameterInfo par = pars[i];
+                var par = pars[i];
                 MemberMapper mi = null;
-                foreach (MemberMapper member in mapper.Members)
+
+                foreach (var member in mapper.Members)
                 {
                     if (member.MemberName.ToLower() == par.Name.ToLower() && member.DataType == par.ParameterType)
                     {
                         mi = member;
+
                         break;
                     }
                 }
@@ -230,17 +242,16 @@ public partial class BsonMapper
                 continue;
             }
 
-            CreateObject toAdd = (BsonDocument value) =>
+            CreateObject toAdd = value =>
                 Activator.CreateInstance(type, paramMap.Select(x =>
-                    this.Deserialize(x.Value, value[x.Key])).ToArray());
+                    Deserialize(x.Value, value[x.Key])).ToArray());
+
             if (ctor.GetCustomAttribute<BsonCtorAttribute>() != null)
             {
                 return toAdd;
             }
-            else
-            {
-                Mappings.Add(toAdd);
-            }
+
+            Mappings.Add(toAdd);
         }
 
         if (returnZeroParamNull)

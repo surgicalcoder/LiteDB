@@ -2,192 +2,211 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using static LiteDB.Constants;
 
-namespace LiteDB
+namespace LiteDbX;
+
+/// <summary>
+/// A class that read a json string using a tokenizer (without regex)
+/// </summary>
+public class JsonReader
 {
-    /// <summary>
-    /// A class that read a json string using a tokenizer (without regex)
-    /// </summary>
-    public class JsonReader
+    private static readonly IFormatProvider _numberFormat = CultureInfo.InvariantCulture.NumberFormat;
+
+    private readonly Tokenizer _tokenizer;
+
+    public JsonReader(TextReader reader)
     {
-        private readonly static IFormatProvider _numberFormat = CultureInfo.InvariantCulture.NumberFormat;
-
-        private readonly Tokenizer _tokenizer = null;
-
-        public long Position { get { return _tokenizer.Position; } }
-
-        public JsonReader(TextReader reader)
+        if (reader == null)
         {
-            if (reader == null) throw new ArgumentNullException(nameof(reader));
-
-            _tokenizer = new Tokenizer(reader);
+            throw new ArgumentNullException(nameof(reader));
         }
 
-        internal JsonReader(Tokenizer tokenizer)
+        _tokenizer = new Tokenizer(reader);
+    }
+
+    internal JsonReader(Tokenizer tokenizer)
+    {
+        _tokenizer = tokenizer ?? throw new ArgumentNullException(nameof(tokenizer));
+    }
+
+    public long Position => _tokenizer.Position;
+
+    public BsonValue Deserialize()
+    {
+        var token = _tokenizer.ReadToken();
+
+        if (token.Type == TokenType.EOF)
         {
-            _tokenizer = tokenizer ?? throw new ArgumentNullException(nameof(tokenizer));
+            return BsonValue.Null;
         }
 
-        public BsonValue Deserialize()
+        var value = ReadValue(token);
+
+        return value;
+    }
+
+    public IEnumerable<BsonValue> DeserializeArray()
+    {
+        var token = _tokenizer.ReadToken();
+
+        if (token.Type == TokenType.EOF)
         {
-            var token = _tokenizer.ReadToken();
-
-            if (token.Type == TokenType.EOF) return BsonValue.Null;
-
-            var value = this.ReadValue(token);
-
-            return value;
-        }
-
-        public IEnumerable<BsonValue> DeserializeArray()
-        {
-            var token = _tokenizer.ReadToken();
-
-            if (token.Type == TokenType.EOF) yield break;
-
-            token.Expect(TokenType.OpenBracket);
-
-            token = _tokenizer.ReadToken();
-
-            while (token.Type != TokenType.CloseBracket)
-            {
-                yield return this.ReadValue(token);
-
-                token = _tokenizer.ReadToken();
-
-                if (token.Type == TokenType.Comma)
-                {
-                    token = _tokenizer.ReadToken();
-                }
-            }
-
-            token.Expect(TokenType.CloseBracket);
-
             yield break;
         }
 
-        internal BsonValue ReadValue(Token token)
+        token.Expect(TokenType.OpenBracket);
+
+        token = _tokenizer.ReadToken();
+
+        while (token.Type != TokenType.CloseBracket)
         {
-            var value = token.Value;
-            switch (token.Type)
+            yield return ReadValue(token);
+
+            token = _tokenizer.ReadToken();
+
+            if (token.Type == TokenType.Comma)
             {
-                case TokenType.String: return value;
-                case TokenType.OpenBrace: return this.ReadObject();
-                case TokenType.OpenBracket: return this.ReadArray();
-                case TokenType.Minus:
-                    // read next token (must be a number)
-                    var number = _tokenizer.ReadToken(false).Expect(TokenType.Int, TokenType.Double);
-                    value = '-' + number.Value;
-                    if (number.Type == TokenType.Int)
-                        goto case TokenType.Int;
-                    else if (number.Type == TokenType.Double)
-                        goto case TokenType.Double;
-                    else
-                        break;
-                case TokenType.Int:
-                    if (Int32.TryParse(value, NumberStyles.Any, _numberFormat, out int result))
-                        return new BsonValue(result);
-                    else
-                        return new BsonValue(Int64.Parse(value, NumberStyles.Any, _numberFormat));
-                case TokenType.Double: return new BsonValue(Convert.ToDouble(value, _numberFormat));
-                case TokenType.Word:
-                    switch (value.ToLower())
-                    {
-                        case "null": return BsonValue.Null;
-                        case "true": return true;
-                        case "false": return false;
-                        default: throw LiteException.UnexpectedToken(token);
-                    }
-            }
-
-            throw LiteException.UnexpectedToken(token);
-        }
-
-        private BsonValue ReadObject()
-        {
-            var obj = new BsonDocument();
-
-            var token = _tokenizer.ReadToken(); // read "<key>"
-
-            while (token.Type != TokenType.CloseBrace)
-            {
-                token.Expect(TokenType.String, TokenType.Word);
-
-                var key = token.Value;
-
-                token = _tokenizer.ReadToken(); // read ":"
-
-                token.Expect(TokenType.Colon);
-
-                token = _tokenizer.ReadToken(); // read "<value>"
-
-                // check if not a special data type - only if is first attribute
-                if (key[0] == '$' && obj.Count == 0)
-                {
-                    var val = this.ReadExtendedDataType(key, token.Value);
-
-                    // if val is null then it's not a extended data type - it's just a object with $ attribute
-                    if (!val.IsNull) return val;
-                }
-
-                obj[key] = this.ReadValue(token); // read "," or "}"
-
                 token = _tokenizer.ReadToken();
+            }
+        }
 
-                if (token.Type == TokenType.Comma)
+        token.Expect(TokenType.CloseBracket);
+
+        yield break;
+    }
+
+    internal BsonValue ReadValue(Token token)
+    {
+        var value = token.Value;
+
+        switch (token.Type)
+        {
+            case TokenType.String: return value;
+            case TokenType.OpenBrace: return ReadObject();
+            case TokenType.OpenBracket: return ReadArray();
+            case TokenType.Minus:
+                // read next token (must be a number)
+                var number = _tokenizer.ReadToken(false).Expect(TokenType.Int, TokenType.Double);
+                value = '-' + number.Value;
+
+                if (number.Type == TokenType.Int)
                 {
-                    token = _tokenizer.ReadToken(); // read "<key>"
+                    goto case TokenType.Int;
+                }
+
+                if (number.Type == TokenType.Double)
+                {
+                    goto case TokenType.Double;
+                }
+
+                break;
+            case TokenType.Int:
+                if (int.TryParse(value, NumberStyles.Any, _numberFormat, out var result))
+                {
+                    return new BsonValue(result);
+                }
+
+                return new BsonValue(long.Parse(value, NumberStyles.Any, _numberFormat));
+            case TokenType.Double: return new BsonValue(Convert.ToDouble(value, _numberFormat));
+            case TokenType.Word:
+                switch (value.ToLower())
+                {
+                    case "null": return BsonValue.Null;
+                    case "true": return true;
+                    case "false": return false;
+                    default: throw LiteException.UnexpectedToken(token);
+                }
+        }
+
+        throw LiteException.UnexpectedToken(token);
+    }
+
+    private BsonValue ReadObject()
+    {
+        var obj = new BsonDocument();
+
+        var token = _tokenizer.ReadToken(); // read "<key>"
+
+        while (token.Type != TokenType.CloseBrace)
+        {
+            token.Expect(TokenType.String, TokenType.Word);
+
+            var key = token.Value;
+
+            token = _tokenizer.ReadToken(); // read ":"
+
+            token.Expect(TokenType.Colon);
+
+            token = _tokenizer.ReadToken(); // read "<value>"
+
+            // check if not a special data type - only if is first attribute
+            if (key[0] == '$' && obj.Count == 0)
+            {
+                var val = ReadExtendedDataType(key, token.Value);
+
+                // if val is null then it's not a extended data type - it's just a object with $ attribute
+                if (!val.IsNull)
+                {
+                    return val;
                 }
             }
 
-            return obj;
+            obj[key] = ReadValue(token); // read "," or "}"
+
+            token = _tokenizer.ReadToken();
+
+            if (token.Type == TokenType.Comma)
+            {
+                token = _tokenizer.ReadToken(); // read "<key>"
+            }
         }
 
-        private BsonArray ReadArray()
+        return obj;
+    }
+
+    private BsonArray ReadArray()
+    {
+        var arr = new BsonArray();
+
+        var token = _tokenizer.ReadToken();
+
+        while (token.Type != TokenType.CloseBracket)
         {
-            var arr = new BsonArray();
+            var value = ReadValue(token);
 
-            var token = _tokenizer.ReadToken();
+            arr.Add(value);
 
-            while (token.Type != TokenType.CloseBracket)
+            token = _tokenizer.ReadToken();
+
+            if (token.Type == TokenType.Comma)
             {
-                var value = this.ReadValue(token);
-
-                arr.Add(value);
-
                 token = _tokenizer.ReadToken();
-
-                if (token.Type == TokenType.Comma)
-                {
-                    token = _tokenizer.ReadToken();
-                }
             }
-
-            return arr;
         }
 
-        private BsonValue ReadExtendedDataType(string key, string value)
+        return arr;
+    }
+
+    private BsonValue ReadExtendedDataType(string key, string value)
+    {
+        BsonValue val;
+
+        switch (key)
         {
-            BsonValue val;
+            case "$binary": val = new BsonValue(Convert.FromBase64String(value)); break;
+            case "$oid": val = new BsonValue(new ObjectId(value)); break;
+            case "$guid": val = new BsonValue(new Guid(value)); break;
+            case "$date": val = new BsonValue(DateTime.Parse(value).ToLocalTime()); break;
+            case "$numberLong": val = new BsonValue(Convert.ToInt64(value, _numberFormat)); break;
+            case "$numberDecimal": val = new BsonValue(Convert.ToDecimal(value, _numberFormat)); break;
+            case "$minValue": val = BsonValue.MinValue; break;
+            case "$maxValue": val = BsonValue.MaxValue; break;
 
-            switch (key)
-            {
-                case "$binary": val = new BsonValue(Convert.FromBase64String(value)); break;
-                case "$oid": val = new BsonValue(new ObjectId(value)); break;
-                case "$guid": val = new BsonValue(new Guid(value)); break;
-                case "$date": val = new BsonValue(DateTime.Parse(value).ToLocalTime()); break;
-                case "$numberLong": val = new BsonValue(Convert.ToInt64(value, _numberFormat)); break;
-                case "$numberDecimal": val = new BsonValue(Convert.ToDecimal(value, _numberFormat)); break;
-                case "$minValue": val = BsonValue.MinValue; break;
-                case "$maxValue": val = BsonValue.MaxValue; break;
-
-                default: return BsonValue.Null; // is not a special data type
-            }
-
-            _tokenizer.ReadToken().Expect(TokenType.CloseBrace);
-
-            return val;
+            default: return BsonValue.Null; // is not a special data type
         }
+
+        _tokenizer.ReadToken().Expect(TokenType.CloseBrace);
+
+        return val;
     }
 }

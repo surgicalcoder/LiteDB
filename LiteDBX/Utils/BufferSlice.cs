@@ -1,130 +1,123 @@
 ﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.IO;
-using System.Linq;
-using System.Reflection;
 using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading;
-using static LiteDB.Constants;
+using static LiteDbX.Constants;
 
-namespace LiteDB
+namespace LiteDbX;
+
+/// <summary>
+/// Internal class that implement same idea from ArraySegment[byte] but use a class (not a struct). Works for byte[] only
+/// </summary>
+internal class BufferSlice
 {
-    /// <summary>
-    /// Internal class that implement same idea from ArraySegment[byte] but use a class (not a struct). Works for byte[] only
-    /// </summary>
-    internal class BufferSlice
+    public BufferSlice(byte[] array, int offset, int count)
     {
-        public int Offset { get; }
-        public int Count { get; }
-        public byte[] Array { get; }
+        Array = array;
+        Offset = offset;
+        Count = count;
+    }
 
-        public BufferSlice(byte[] array, int offset, int count)
+    public int Offset { get; }
+    public int Count { get; }
+    public byte[] Array { get; }
+
+    public byte this[int index]
+    {
+        get => Array[Offset + index];
+        set => Array[Offset + index] = value;
+    }
+
+    /// <summary>
+    /// Clear all page content byte array (not controls)
+    /// </summary>
+    public void Clear()
+    {
+        System.Array.Clear(Array, Offset, Count);
+    }
+
+    /// <summary>
+    /// Clear page content byte array
+    /// </summary>
+    public void Clear(int offset, int count)
+    {
+        ENSURE(offset + count <= Count, "must fit in this page");
+
+        System.Array.Clear(Array, Offset + offset, count);
+    }
+
+    /// <summary>
+    /// Fill all content with value. Used for DEBUG propost
+    /// </summary>
+    public void Fill(byte value)
+    {
+        for (var i = 0; i < Count; i++)
         {
-            this.Array = array;
-            this.Offset = offset;
-            this.Count = count;
+            Array[Offset + i] = value;
         }
+    }
 
-        public byte this[int index]
+    /// <summary>
+    /// Checks if all values contains only value parameter (used for DEBUG)
+    /// </summary>
+    public bool All(byte value)
+    {
+        for (var i = 0; i < Count; i++)
         {
-            get => this.Array[this.Offset + index];
-            set => this.Array[this.Offset + index] = value;
-        }
-
-        /// <summary>
-        /// Clear all page content byte array (not controls)
-        /// </summary>
-        public void Clear()
-        {
-            System.Array.Clear(this.Array, this.Offset, this.Count);
-        }
-
-        /// <summary>
-        /// Clear page content byte array
-        /// </summary>
-        public void Clear(int offset, int count)
-        {
-            ENSURE(offset + count <= this.Count, "must fit in this page");
-
-            System.Array.Clear(this.Array, this.Offset + offset, count);
-        }
-
-        /// <summary>
-        /// Fill all content with value. Used for DEBUG propost
-        /// </summary>
-        public void Fill(byte value)
-        {
-            for (var i = 0; i < this.Count; i++)
+            if (Array[Offset + i] != value)
             {
-                this.Array[this.Offset + i] = value;
+                return false;
             }
         }
 
-        /// <summary>
-        /// Checks if all values contains only value parameter (used for DEBUG)
-        /// </summary>
-        public bool All(byte value)
+        return true;
+    }
+
+    /// <summary>
+    /// Return byte[] slice into hex digits
+    /// </summary>
+    public string ToHex()
+    {
+        var output = new StringBuilder();
+        var position = 0L;
+
+        while (position < Count)
         {
-            for (var i = 0; i < this.Count; i++)
+            //output.Append(position.ToString("X3") + "  ");
+
+            for (var i = 0; i < 32 && position < Count; i++)
             {
-                if (this.Array[this.Offset + i] != value) return false;
+                output.Append(Array[Offset + position].ToString("X2") + " ");
+
+                position++;
             }
 
-            return true;
+            output.AppendLine();
         }
 
-        /// <summary>
-        /// Return byte[] slice into hex digits
-        /// </summary>
-        public string ToHex()
-        {
-            var output = new StringBuilder();
-            var position = 0L;
+        return output.ToString();
+    }
 
-            while(position < this.Count)
-            {
-                //output.Append(position.ToString("X3") + "  ");
+    /// <summary>
+    /// Slice this buffer into new BufferSlice according new offset and new count
+    /// </summary>
+    public BufferSlice Slice(int offset, int count)
+    {
+        return new BufferSlice(Array, Offset + offset, count);
+    }
 
-                for (var i = 0; i < 32 && position < this.Count; i++)
-                {
-                    output.Append(this.Array[this.Offset + position].ToString("X2") + " ");
+    /// <summary>
+    /// Convert this buffer slice into new byte[]
+    /// </summary>
+    public byte[] ToArray()
+    {
+        var buffer = new byte[Count];
 
-                    position++;
-                }
+        Buffer.BlockCopy(Array, Offset, buffer, 0, Count);
 
-                output.AppendLine();
+        return buffer;
+    }
 
-            }
-
-            return output.ToString();
-        }
-
-        /// <summary>
-        /// Slice this buffer into new BufferSlice according new offset and new count
-        /// </summary>
-        public BufferSlice Slice(int offset, int count)
-        {
-            return new BufferSlice(this.Array, this.Offset + offset, count);
-        }
-
-        /// <summary>
-        /// Convert this buffer slice into new byte[]
-        /// </summary>
-        public byte[] ToArray()
-        {
-            var buffer = new byte[this.Count];
-
-            Buffer.BlockCopy(this.Array, this.Offset, buffer, 0, this.Count);
-
-            return buffer;
-        }
-
-        public override string ToString()
-        {
-            return $"Offset: {this.Offset} - Count: {this.Count}";
-        }
+    public override string ToString()
+    {
+        return $"Offset: {Offset} - Count: {Count}";
     }
 }

@@ -1,7 +1,7 @@
 ﻿using System;
 using Xunit;
 
-namespace LiteDB.Tests.Engine;
+namespace LiteDbX.Tests.Engine;
 
 public class Recursion_Tests
 {
@@ -10,30 +10,32 @@ public class Recursion_Tests
     {
         Test(collection =>
         {
-            foreach (BsonDocument document in collection.FindAll())
+            foreach (var document in collection.FindAll())
             {
                 collection.Update(document);
             }
         });
     }
+
     [Fact]
     public void InsertDeleteInFindAll()
     {
         Test(collection =>
         {
-            foreach (BsonDocument document in collection.FindAll())
+            foreach (var document in collection.FindAll())
             {
-                BsonValue id = collection.Insert(new BsonDocument());
+                var id = collection.Insert(new BsonDocument());
                 collection.Delete(id);
             }
         });
     }
+
     [Fact]
     public void QueryInFindAll()
     {
         Test(collection =>
         {
-            foreach (BsonDocument document in collection.FindAll())
+            foreach (var document in collection.FindAll())
             {
                 collection.Query().Count();
             }
@@ -42,13 +44,13 @@ public class Recursion_Tests
 
     private void Test(Action<ILiteCollection<BsonDocument>> action)
     {
-        using LiteDatabase database = new(new ConnectionString()
+        using LiteDatabase database = new(new ConnectionString
         {
             Filename = "Demo.db",
-            Connection = ConnectionType.Shared,
+            Connection = ConnectionType.Shared
         });
 
-        ILiteCollection<BsonDocument> accounts = database.GetCollection("Recursion");
+        var accounts = database.GetCollection("Recursion");
 
         if (accounts.Count() < 3)
         {
@@ -56,6 +58,7 @@ public class Recursion_Tests
             accounts.Insert(new BsonDocument());
             accounts.Insert(new BsonDocument());
         }
+
         action(accounts);
     }
 }

@@ -1,21 +1,19 @@
 ﻿using System;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using FluentAssertions;
-using LiteDB.Engine;
 using Xunit;
 
-namespace LiteDB.Tests.Database
-{
-    public class Document_Size_Tests
-    {
-        const int ARRAY_SIZE = 10 * 1024 * 1024;
+namespace LiteDbX.Tests.Database;
 
-        [Fact]
-        public void Very_Large_Single_Document_Support_With_Partial_Load_Memory_Usage()
+public class Document_Size_Tests
+{
+    private const int ARRAY_SIZE = 10 * 1024 * 1024;
+
+    [Fact]
+    public void Very_Large_Single_Document_Support_With_Partial_Load_Memory_Usage()
+    {
+        using (var file = new TempFile())
         {
-            using (var file = new TempFile())
             using (var db = new LiteDatabase(file.Filename))
             {
                 var col = db.GetCollection("col");
@@ -23,9 +21,9 @@ namespace LiteDB.Tests.Database
                 // insert 10 mb document
 
                 col.Insert(new BsonDocument
-                { 
-                    ["_id"] = 1, 
-                    ["name"] = "John", 
+                {
+                    ["_id"] = 1,
+                    ["name"] = "John",
                     ["data"] = new byte[ARRAY_SIZE]
                 });
 

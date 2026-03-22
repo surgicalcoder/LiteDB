@@ -1,80 +1,77 @@
-﻿using System.Collections.Generic;
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using FluentAssertions;
 using Xunit;
 
-namespace LiteDB.Tests.Database
+namespace LiteDbX.Tests.Database;
+
+public class Crud_Tests
 {
-    public class Crud_Tests
+    [Fact]
+    public void Insert_With_AutoId()
     {
-        #region Model 
-
-        public class User
+        using (var db = new LiteDatabase(new MemoryStream()))
         {
-            public int Id { get; set; }
-            public string Name { get; set; }
-        }
+            var users = db.GetCollection<User>("users");
 
-        #endregion
+            var u1 = new User { Name = "John" };
+            var u2 = new User { Name = "Zarlos" };
+            var u3 = new User { Name = "Ana" };
 
-        [Fact]
-        public void Insert_With_AutoId()
-        {
-            using (var db = new LiteDatabase(new MemoryStream()))
-            {
-                var users = db.GetCollection<User>("users");
+            // insert ienumerable
+            users.Insert(new[] { u1, u2 });
 
-                var u1 = new User { Name = "John" };
-                var u2 = new User { Name = "Zarlos" };
-                var u3 = new User { Name = "Ana" };
+            users.Insert(u3);
 
-                // insert ienumerable
-                users.Insert(new User[] { u1, u2 });
+            // test auto-id
+            u1.Id.Should().Be(1);
+            u2.Id.Should().Be(2);
+            u3.Id.Should().Be(3);
 
-                users.Insert(u3);
+            // adding without autoId
+            var u4 = new User { Id = 20, Name = "Marco" };
 
-                // test auto-id
-                u1.Id.Should().Be(1);
-                u2.Id.Should().Be(2);
-                u3.Id.Should().Be(3);
+            users.Insert(u4);
 
-                // adding without autoId
-                var u4 = new User { Id = 20, Name = "Marco" };
+            // adding more auto id after fixed id
+            var u5 = new User { Name = "Julio" };
 
-                users.Insert(u4);
+            users.Insert(u5);
 
-                // adding more auto id after fixed id
-                var u5 = new User { Name = "Julio" };
-
-                users.Insert(u5);
-
-                u5.Id.Should().Be(21);
-            }
-        }
-
-        [Fact]
-        public void Delete_Many()
-        {
-            using (var db = new LiteDatabase(new MemoryStream()))
-            {
-                var users = db.GetCollection<User>("users");
-
-                var u1 = new User { Id = 1, Name = "John" };
-                var u2 = new User { Id = 2, Name = "Zarlos" };
-                var u3 = new User { Id = 3, Name = "Ana" };
-
-                users.Insert(new User[] { u1, u2, u3 });
-
-                var ids = new int[] { 1, 2, 3 };
-
-                var docs = users.Query().Where(x => ids.Contains(x.Id)).ToArray();
-
-                users.DeleteMany(x => ids.Contains(x.Id));
-
-                users.Count().Should().Be(0);
-
-            }
+            u5.Id.Should().Be(21);
         }
     }
+
+    [Fact]
+    public void Delete_Many()
+    {
+        using (var db = new LiteDatabase(new MemoryStream()))
+        {
+            var users = db.GetCollection<User>("users");
+
+            var u1 = new User { Id = 1, Name = "John" };
+            var u2 = new User { Id = 2, Name = "Zarlos" };
+            var u3 = new User { Id = 3, Name = "Ana" };
+
+            users.Insert(new[] { u1, u2, u3 });
+
+            var ids = new[] { 1, 2, 3 };
+
+            var docs = users.Query().Where(x => ids.Contains(x.Id)).ToArray();
+
+            users.DeleteMany(x => ids.Contains(x.Id));
+
+            users.Count().Should().Be(0);
+        }
+    }
+
+    #region Model
+
+    public class User
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+    }
+
+    #endregion
 }

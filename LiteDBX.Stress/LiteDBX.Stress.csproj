@@ -1,13 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <RootNamespace>LiteDB.Stress</RootNamespace>
-  </PropertyGroup>
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>LiteDbX.Stress</RootNamespace>
+        <AssemblyName>LiteDbX.Stress</AssemblyName>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\LiteDBX\LiteDBX.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\LiteDBX\LiteDBX.csproj"/>
+    </ItemGroup>
 
 </Project>

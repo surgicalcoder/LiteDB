@@ -5,81 +5,80 @@ using System.Linq;
 using FluentAssertions;
 using Xunit;
 
-namespace LiteDB.Tests.Mapper
+namespace LiteDbX.Tests.Mapper;
+
+public class Dictionary_Tests
 {
-    public class Dictionary_Tests
+    private readonly BsonMapper _mapper = new();
+
+    [Fact]
+    public void Dictionary_Map()
     {
-        public class Dict
-        {
-            public IDictionary<DateTime, string> DateDict { get; set; } = new Dictionary<DateTime, string>();
-        }
+        var obj = new Dict();
 
-        private readonly BsonMapper _mapper = new BsonMapper();
+        obj.DateDict[DateTime.Now] = "now!";
 
-        [Fact]
-        public void Dictionary_Map()
-        {
-            var obj = new Dict();
+        var doc = _mapper.ToDocument(obj);
 
-            obj.DateDict[DateTime.Now] = "now!";
+        var newobj = _mapper.ToObject<Dict>(doc);
 
-            var doc = _mapper.ToDocument(obj);
+        newobj.DateDict.Keys.First().Should().Be(obj.DateDict.Keys.First());
+    }
 
-            var newobj = _mapper.ToObject<Dict>(doc);
+    [Fact]
+    public void Deserialize_Object()
+    {
+        var doc = new BsonDocument { ["x"] = 1 };
 
-            newobj.DateDict.Keys.First().Should().Be(obj.DateDict.Keys.First());
-        }
+        var result = _mapper.Deserialize(typeof(object), doc);
+        Assert.Equal(typeof(Dictionary<string, object>), result.GetType());
 
-        [Fact]
-        public void Deserialize_Object()
-        {
-            var doc = new BsonDocument() { ["x"] = 1 };
+        //! used to be empty
+        var dic = (Dictionary<string, object>)result;
+        Assert.Single(dic);
+        Assert.Equal(1, dic["x"]);
+    }
 
-            var result = _mapper.Deserialize(typeof(object), doc);
-            Assert.Equal(typeof(Dictionary<string, object>), result.GetType());
+    [Fact]
+    public void Deserialize_Hashtable()
+    {
+        var doc = new BsonDocument { ["x"] = 1 };
 
-            //! used to be empty
-            var dic = (Dictionary<string, object>)result;
-            Assert.Single(dic);
-            Assert.Equal(1, dic["x"]);
-        }
+        var result = _mapper.Deserialize(typeof(Hashtable), doc);
+        Assert.Equal(typeof(Hashtable), result.GetType());
 
-        [Fact]
-        public void Deserialize_Hashtable()
-        {
-            var doc = new BsonDocument() { ["x"] = 1 };
+        //! used to be empty
+        var dic = (Hashtable)result;
+        Assert.Single(dic);
+        Assert.Equal(1, dic["x"]);
+    }
 
-            var result = _mapper.Deserialize(typeof(Hashtable), doc);
-            Assert.Equal(typeof(Hashtable), result.GetType());
+    [Fact]
+    public void Serialize_Hashtable()
+    {
+        var data = new Hashtable { ["x"] = 1 };
 
-            //! used to be empty
-            var dic = (Hashtable)result;
-            Assert.Single(dic);
-            Assert.Equal(1, dic["x"]);
-        }
+        //! used to fail
+        var result = _mapper.Serialize(data).AsDocument;
 
-        [Fact]
-        public void Serialize_Hashtable()
-        {
-            var data = new Hashtable() { ["x"] = 1 };
+        Assert.Single(result);
+        Assert.Equal(1, result["x"].AsInt32);
+    }
 
-            //! used to fail
-            var result = _mapper.Serialize(data).AsDocument;
+    [Fact]
+    public void Deserialize_Uri()
+    {
+        var dict = new Dictionary<Uri, string>();
+        dict.Add(new Uri("http://www.litedb.org/"), "LiteDBX website");
+        var doc = _mapper.Serialize(dict).AsDocument;
+        var dict2 = _mapper.Deserialize<Dictionary<Uri, string>>(doc);
 
-            Assert.Single(result);
-            Assert.Equal(1, result["x"].AsInt32);
-        }
+        Assert.Single(dict2);
+        Assert.Equal(dict.Keys.Single(), dict2.Keys.Single());
+    }
 
-        [Fact]
-        public void Deserialize_Uri()
-        {
-            var dict = new Dictionary<Uri, string>();
-            dict.Add(new Uri("http://www.litedb.org/"), "LiteDBX website");
-            var doc = _mapper.Serialize(dict).AsDocument;
-            var dict2 = _mapper.Deserialize<Dictionary<Uri, string>>(doc);
-
-            Assert.Single(dict2);
-            Assert.Equal(dict.Keys.Single(), dict2.Keys.Single());
-        }
+    public class Dict
+    {
+        public IDictionary<DateTime, string> DateDict { get; set; } = new Dictionary<DateTime, string>();
     }
 }

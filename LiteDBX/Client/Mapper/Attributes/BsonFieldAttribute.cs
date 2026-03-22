@@ -1,22 +1,18 @@
 ﻿using System;
-using static LiteDB.Constants;
 
-namespace LiteDB
+namespace LiteDbX;
+
+/// <summary>
+/// Set a name to this property in BsonDocument
+/// </summary>
+public class BsonFieldAttribute : Attribute
 {
-    /// <summary>
-    /// Set a name to this property in BsonDocument
-    /// </summary>
-    public class BsonFieldAttribute : Attribute
+    public BsonFieldAttribute(string name)
     {
-        public string Name { get; set; }
-
-        public BsonFieldAttribute(string name)
-        {
-            this.Name = name;
-        }
-
-        public BsonFieldAttribute()
-        {
-        }
+        Name = name;
     }
+
+    public BsonFieldAttribute() { }
+
+    public string Name { get; set; }
 }

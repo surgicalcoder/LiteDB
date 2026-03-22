@@ -1,56 +1,57 @@
-﻿using LiteDB.Engine;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
+﻿using System;
 
-namespace LiteDB
+namespace LiteDbX;
+
+public class SharedDataReader : IBsonDataReader
 {
-    public class SharedDataReader : IBsonDataReader
+    private readonly Action _dispose;
+    private readonly IBsonDataReader _reader;
+
+    private bool _disposed;
+
+    public SharedDataReader(IBsonDataReader reader, Action dispose)
     {
-        private readonly IBsonDataReader _reader;
-        private readonly Action _dispose;
+        _reader = reader;
+        _dispose = dispose;
+    }
 
-        private bool _disposed = false;
+    public BsonValue this[string field] => _reader[field];
 
-        public SharedDataReader(IBsonDataReader reader, Action dispose)
+    public string Collection => _reader.Collection;
+
+    public BsonValue Current => _reader.Current;
+
+    public bool HasValues => _reader.HasValues;
+
+    public bool Read()
+    {
+        return _reader.Read();
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    ~SharedDataReader()
+    {
+        Dispose(false);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
         {
-            _reader = reader;
-            _dispose = dispose;
+            return;
         }
 
-        public BsonValue this[string field] => _reader[field];
+        _disposed = true;
 
-        public string Collection => _reader.Collection;
-
-        public BsonValue Current => _reader.Current;
-
-        public bool HasValues => _reader.HasValues;
-
-        public bool Read() => _reader.Read();
-
-        public void Dispose()
+        if (disposing)
         {
-            this.Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        ~SharedDataReader()
-        {
-            this.Dispose(false);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (_disposed) return;
-
-            _disposed = true;
-
-            if (disposing)
-            {
-                _reader.Dispose();
-                _dispose();
-            }
+            _reader.Dispose();
+            _dispose();
         }
     }
 }

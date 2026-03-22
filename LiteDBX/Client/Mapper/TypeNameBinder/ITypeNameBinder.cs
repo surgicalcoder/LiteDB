@@ -1,10 +1,9 @@
 ﻿using System;
 
-namespace LiteDB
+namespace LiteDbX;
+
+public interface ITypeNameBinder
 {
-    public interface ITypeNameBinder
-    {
-        string GetName(Type type);
-        Type GetType(string name);
-    }
+    string GetName(Type type);
+    Type GetType(string name);
 }

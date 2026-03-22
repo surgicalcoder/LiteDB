@@ -1,51 +1,46 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using static LiteDB.Constants;
+﻿using System.IO;
 
-namespace LiteDB.Engine
+namespace LiteDbX.Engine;
+
+/// <summary>
+/// Interface factory to provider new Stream instances for datafile/walfile resources. It's useful to multiple threads can
+/// read same datafile
+/// </summary>
+internal interface IStreamFactory
 {
     /// <summary>
-    /// Interface factory to provider new Stream instances for datafile/walfile resources. It's useful to multiple threads can read same datafile
+    /// Get Stream name (filename)
     /// </summary>
-    internal interface IStreamFactory
-    {
-        /// <summary>
-        /// Get Stream name (filename)
-        /// </summary>
-        string Name { get; }
+    string Name { get; }
 
-        /// <summary>
-        /// Get new Stream instance
-        /// </summary>
-        Stream GetStream(bool canWrite, bool sequencial);
+    /// <summary>
+    /// Indicate that factory must be dispose on finish
+    /// </summary>
+    bool CloseOnDispose { get; }
 
-        /// <summary>
-        /// Get file length
-        /// </summary>
-        /// <returns></returns>
-        long GetLength();
+    /// <summary>
+    /// Get new Stream instance
+    /// </summary>
+    Stream GetStream(bool canWrite, bool sequencial);
 
-        /// <summary>
-        /// Checks if file exists
-        /// </summary>
-        bool Exists();
+    /// <summary>
+    /// Get file length
+    /// </summary>
+    /// <returns></returns>
+    long GetLength();
 
-        /// <summary>
-        /// Delete physical file on disk
-        /// </summary>
-        void Delete();
+    /// <summary>
+    /// Checks if file exists
+    /// </summary>
+    bool Exists();
 
-        /// <summary>
-        /// Test if this file are used by another process
-        /// </summary>
-        bool IsLocked();
+    /// <summary>
+    /// Delete physical file on disk
+    /// </summary>
+    void Delete();
 
-        /// <summary>
-        /// Indicate that factory must be dispose on finish
-        /// </summary>
-        bool CloseOnDispose { get; }
-    }
+    /// <summary>
+    /// Test if this file are used by another process
+    /// </summary>
+    bool IsLocked();
 }
