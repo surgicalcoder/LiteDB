@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
 
@@ -20,16 +21,16 @@ public class Mapper_Tests
     }
 
     [Fact]
-    public void Class_Not_Assignable()
+    public async Task Class_Not_Assignable()
     {
-        using (var db = new LiteDatabase(":memory:"))
+        await using (var db = new LiteDatabase(":memory:"))
         {
             var col = db.GetCollection<MyClass>("Test");
-            col.Insert(new MyClass { Id = 1, Member = null });
+            await col.Insert(new MyClass { Id = 1, Member = null });
             var type = typeof(OtherClass);
             var typeName = type.FullName + ", " + type.GetTypeInfo().Assembly.GetName().Name;
 
-            db.Execute($"update Test set Member = {{_id: 1, Name: null, _type: \"{typeName}\"}} where _id = 1");
+            await db.Execute($"update Test set Member = {{_id: 1, Name: null, _type: \"{typeName}\"}} where _id = 1");
 
             var func = () => col.FindById(1);
             func.Should().Throw<LiteException>();
