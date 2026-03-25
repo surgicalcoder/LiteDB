@@ -19,7 +19,7 @@ public class Issue2471_Test
         var fragment = new object();
         var id = await collection.Insert(fragment);
 
-        id.AsInt32.Should().BeGreaterThan(0);
+        id.IsObjectId.Should().BeTrue();
 
         var frag2 = await collection.FindById(id);
         frag2.Should().NotBeNull();
