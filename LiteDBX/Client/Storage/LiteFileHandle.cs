@@ -63,7 +63,7 @@ internal sealed class LiteFileHandle<TFileId> : ILiteFileHandle<TFileId>
     // ── Write state ───────────────────────────────────────────────────────────
 
     private MemoryStream _writeBuffer;
-    private bool _finalized;
+    private bool _writeStateDirty;
 
     // ── Construction ─────────────────────────────────────────────────────────
 
@@ -134,11 +134,9 @@ internal sealed class LiteFileHandle<TFileId> : ILiteFileHandle<TFileId>
         if (buffer.IsEmpty || _position >= FileInfo.Length)
             return 0;
 
-        var targetChunkIndex = EstimateChunkIndex(_position);
-
-        if (_currentChunkIndex != targetChunkIndex || _currentChunkData == null)
+        if (_currentChunkData == null)
         {
-            await LoadChunk(targetChunkIndex, cancellationToken).ConfigureAwait(false);
+            await LoadChunkForPosition(_position, cancellationToken).ConfigureAwait(false);
         }
 
         if (_currentChunkData == null)
@@ -189,6 +187,7 @@ internal sealed class LiteFileHandle<TFileId> : ILiteFileHandle<TFileId>
         if (buffer.IsEmpty)
             return;
 
+        _writeStateDirty = true;
         _position += buffer.Length;
 
         // MemoryStream.WriteAsync accepts byte[] rather than ReadOnlyMemory<byte> on .NET Standard 2.x,
@@ -252,7 +251,7 @@ internal sealed class LiteFileHandle<TFileId> : ILiteFileHandle<TFileId>
 
         _disposed = true;
 
-        if (CanWrite && !_finalized)
+        if (CanWrite && (_writeStateDirty || (_writeBuffer?.Length ?? 0) > 0))
         {
             // Best-effort flush; if the write session was abandoned without an explicit Flush()
             // we still attempt to commit whatever data was buffered.
@@ -296,38 +295,56 @@ internal sealed class LiteFileHandle<TFileId> : ILiteFileHandle<TFileId>
     }
 
     /// <summary>
-    /// Estimate the chunk index that contains <paramref name="position"/> within the file.
-    /// Uses cached chunk lengths for accuracy; falls back to uniform-chunk-size division for
-    /// chunks not yet loaded.
+    /// Load the exact chunk that contains <paramref name="position"/> and set
+    /// <see cref="_positionInChunk"/> to the correct intra-chunk offset.
     /// </summary>
-    private int EstimateChunkIndex(long position)
+    private async ValueTask LoadChunkForPosition(long position, CancellationToken cancellationToken)
     {
-        if (position == 0)
-            return 0;
-
-        long cumulative = 0;
-
-        for (int i = 0; ; i++)
+        if (position < 0 || position >= FileInfo.Length)
         {
-            if (_chunkLengths.TryGetValue(i, out var chunkLen))
-            {
-                if (cumulative + chunkLen > position)
-                    return i;
-
-                cumulative += chunkLen;
-            }
-            else
-            {
-                // Remaining lengths are unknown; use MaxChunkSize as the estimate.
-                return i + (int)((position - cumulative) / MaxChunkSize);
-            }
+            _currentChunkData = null;
+            _currentChunkIndex = -1;
+            _positionInChunk = 0;
+            return;
         }
+
+        long remaining = position;
+
+        for (var i = 0; i < FileInfo.Chunks; i++)
+        {
+            if (!_chunkLengths.TryGetValue(i, out var chunkLen))
+            {
+                await LoadChunk(i, cancellationToken).ConfigureAwait(false);
+
+                if (_currentChunkData == null)
+                    return;
+
+                chunkLen = _currentChunkData.Length;
+            }
+
+            if (remaining < chunkLen)
+            {
+                if (_currentChunkIndex != i || _currentChunkData == null)
+                {
+                    await LoadChunk(i, cancellationToken).ConfigureAwait(false);
+                }
+
+                _positionInChunk = (int)remaining;
+                return;
+            }
+
+            remaining -= chunkLen;
+        }
+
+        _currentChunkData = null;
+        _currentChunkIndex = -1;
+        _positionInChunk = 0;
     }
 
     /// <summary>
     /// Drain <see cref="_writeBuffer"/> into the chunks collection.
     /// When <paramref name="finalize"/> is <c>true</c>, updates file metadata in <c>_files</c>
-    /// and sets <see cref="_finalized"/> so subsequent calls are no-ops.
+    /// if there have been writes since the last finalize.
     /// </summary>
     private async ValueTask PersistBufferedChunks(bool finalize, CancellationToken cancellationToken)
     {
@@ -364,12 +381,12 @@ internal sealed class LiteFileHandle<TFileId> : ILiteFileHandle<TFileId>
             await _chunks.Insert(chunkDoc, cancellationToken).ConfigureAwait(false);
         }
 
-        if (finalize && !_finalized)
+        if (finalize && _writeStateDirty)
         {
-            _finalized = true;
             FileInfo.UploadDate = DateTime.UtcNow;
             FileInfo.Length = _position;
             await _files.Upsert(FileInfo, cancellationToken).ConfigureAwait(false);
+            _writeStateDirty = false;
         }
 
         // Reset the write buffer for subsequent Write() calls before a final Flush().
