@@ -101,6 +101,7 @@ internal class QueryExecutor
     {
         TransactionService transaction;
         bool isNew;
+        var releaseTransaction = true;
 
         if (BoundTransaction != null)
         {
@@ -119,10 +120,33 @@ internal class QueryExecutor
 
         transaction.OpenCursors.Add(_cursor);
 
+        using var docs = RunQuery(transaction, executionPlan).GetEnumerator();
+
         try
         {
-            foreach (var doc in RunQuery(transaction, executionPlan))
+            while (true)
             {
+                BsonDocument doc;
+
+                try
+                {
+                    if (!docs.MoveNext())
+                    {
+                        break;
+                    }
+
+                    doc = docs.Current;
+                }
+                catch (Exception ex)
+                {
+                    if (!_state.Handle(ex))
+                    {
+                        releaseTransaction = false;
+                    }
+
+                    throw;
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return doc;
             }
@@ -132,7 +156,7 @@ internal class QueryExecutor
             TransactionMonitor.SetCurrentTransaction(null);
             transaction.OpenCursors.Remove(_cursor);
 
-            if (isNew)
+            if (isNew && releaseTransaction)
             {
                 _monitor.ReleaseTransaction(transaction);
             }

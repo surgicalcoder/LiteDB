@@ -159,7 +159,7 @@ internal class Constants
 
             var message = string.Format(CultureInfo.InvariantCulture, format, args);
 
-            throw LiteException.InvalidDatafileState(format);
+            throw LiteException.InvalidDatafileState(message);
         }
     }
 
