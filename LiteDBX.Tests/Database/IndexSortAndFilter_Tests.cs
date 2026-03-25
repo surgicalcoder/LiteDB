@@ -5,28 +5,37 @@ using Xunit;
 
 namespace LiteDbX.Tests.Database;
 
-public class IndexSortAndFilterTest : IDisposable
+public class IndexSortAndFilterTest : IAsyncLifetime, IDisposable
 {
-    private readonly ILiteCollection<Item> _collection;
-    private readonly ILiteDatabase _database;
-    private readonly TempFile _tempFile;
+    private ILiteCollection<Item> _collection;
+    private ILiteDatabase _database;
+    private TempFile _tempFile;
 
     public IndexSortAndFilterTest()
     {
         _tempFile = new TempFile();
         _database = new LiteDatabase(_tempFile.Filename);
         _collection = _database.GetCollection<Item>("items");
+    }
 
-        _collection.Upsert(new Item { Id = "C", Value = "Value 1" }).GetAwaiter().GetResult();
-        _collection.Upsert(new Item { Id = "A", Value = "Value 2" }).GetAwaiter().GetResult();
-        _collection.Upsert(new Item { Id = "B", Value = "Value 1" }).GetAwaiter().GetResult();
-        _collection.EnsureIndex("idx_value", x => x.Value).GetAwaiter().GetResult();
+    public async Task InitializeAsync()
+    {
+        await _collection.Upsert(new Item { Id = "C", Value = "Value 1" });
+        await _collection.Upsert(new Item { Id = "A", Value = "Value 2" });
+        await _collection.Upsert(new Item { Id = "B", Value = "Value 1" });
+        await _collection.EnsureIndex("idx_value", x => x.Value);
+    }
+
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
     }
 
     public void Dispose()
     {
-        ((IDisposable)_database).Dispose();
-        _tempFile.Dispose();
+        ((IDisposable)_database)?.Dispose();
+        _tempFile?.Dispose();
     }
 
     [Fact]

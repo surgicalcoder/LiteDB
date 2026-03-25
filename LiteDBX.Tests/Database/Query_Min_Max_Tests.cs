@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace LiteDbX.Tests.Database;
@@ -6,16 +7,16 @@ namespace LiteDbX.Tests.Database;
 public class Query_Min_Max_Tests
 {
     [Fact]
-    public void Query_Min_Max()
+    public async Task Query_Min_Max()
     {
         using (var f = new TempFile())
         {
-            using (var db = new LiteDatabase(f.Filename))
+            await using (var db = new LiteDatabase(f.Filename))
             {
                 var c = db.GetCollection<EntityMinMax>("col");
 
-                c.Insert(new EntityMinMax());
-                c.Insert(new EntityMinMax
+                await c.Insert(new EntityMinMax());
+                await c.Insert(new EntityMinMax
                 {
                     ByteValue = 200,
                     IntValue = 443500,
@@ -23,15 +24,15 @@ public class Query_Min_Max_Tests
                     UintValue = 443500
                 });
 
-                c.EnsureIndex(x => x.ByteValue);
-                c.EnsureIndex(x => x.IntValue);
-                c.EnsureIndex(x => x.LongValue);
-                c.EnsureIndex(x => x.UintValue);
+                await c.EnsureIndex(x => x.ByteValue);
+                await c.EnsureIndex(x => x.IntValue);
+                await c.EnsureIndex(x => x.LongValue);
+                await c.EnsureIndex(x => x.UintValue);
 
-                c.Max(x => x.ByteValue).Should().Be(200);
-                c.Max(x => x.IntValue).Should().Be(443500);
-                c.Max(x => x.LongValue).Should().Be(443500);
-                c.Max(x => x.UintValue).Should().Be(443500);
+                (await c.Max(x => x.ByteValue)).Should().Be(200);
+                (await c.Max(x => x.IntValue)).Should().Be(443500);
+                (await c.Max(x => x.LongValue)).Should().Be(443500L);
+                (await c.Max(x => x.UintValue)).Should().Be(443500U);
             }
         }
     }

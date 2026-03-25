@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
 
@@ -8,13 +9,13 @@ namespace LiteDbX.Tests.Database;
 public class MultiKey_Mapper_Tests
 {
     [Fact]
-    public void MultiKey_Mapper()
+    public async Task MultiKey_Mapper()
     {
-        using (var db = new LiteDatabase(":memory:"))
+        await using (var db = new LiteDatabase(":memory:"))
         {
             var col = db.GetCollection<MultiKeyDoc>("col");
 
-            col.Insert(new MultiKeyDoc
+            await col.Insert(new MultiKeyDoc
             {
                 Id = 1,
                 Keys = new[] { 1, 2, 3 },
@@ -27,7 +28,7 @@ public class MultiKey_Mapper_Tests
                 }
             });
 
-            col.Insert(new MultiKeyDoc
+            await col.Insert(new MultiKeyDoc
             {
                 Id = 2,
                 Keys = new[] { 2 },
@@ -37,18 +38,18 @@ public class MultiKey_Mapper_Tests
                 }
             });
 
-            col.EnsureIndex(x => x.Keys);
-            col.EnsureIndex(x => x.Customers.Select(z => z.Name));
+            await col.EnsureIndex(x => x.Keys);
+            await col.EnsureIndex(x => x.Customers.Select(z => z.Name));
 
             // Query.EQ("Keys", 2)
-            col.Count(Query.Any().EQ("Keys", 2)).Should().Be(2);
-            col.Count(x => x.Keys.Contains(2)).Should().Be(2);
+            (await col.Count(Query.Any().EQ("Keys", 2))).Should().Be(2);
+            (await col.Count(x => x.Keys.Contains(2))).Should().Be(2);
 
-            col.Count(Query.Any().StartsWith("Customers[*].Name", "Ana")).Should().Be(2);
-            col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("Ana"))).Should().Be(2);
+            (await col.Count(Query.Any().StartsWith("Customers[*].Name", "Ana"))).Should().Be(2);
+            (await col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("Ana")))).Should().Be(2);
 
-            col.Count(Query.Any().StartsWith("Customers[*].Name", "D")).Should().Be(1);
-            col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("D"))).Should().Be(1);
+            (await col.Count(Query.Any().StartsWith("Customers[*].Name", "D"))).Should().Be(1);
+            (await col.Count(x => x.Customers.Select(z => z.Name).Any(z => z.StartsWith("D")))).Should().Be(1);
         }
     }
 
