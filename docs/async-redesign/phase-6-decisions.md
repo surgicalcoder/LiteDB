@@ -14,20 +14,27 @@ system collections with sync assumptions, and utility helpers that blocked threa
 ### What changed
 
 - Replaced the blocking named OS `Mutex` + `WaitOne()` with a `SemaphoreSlim(1,1)` whose
-  `WaitAsync()` is used in all operational paths.
-- `OpenDatabaseAsync()` acquires the semaphore without blocking any thread.
-- `QueryDatabaseAsync<T>` and `QueryStream` now `await OpenDatabaseAsync()`.
-- `DisposeAsync()` properly awaits the inner `LiteEngine.DisposeAsync()` before disposing
-  the semaphore.
-- `BeginTransaction` continues to throw `NotSupportedException` with an improved message.
+  `WaitAsync()` is used in operational paths.
+- `SharedEngine` now uses a lease-based shared-session model:
+  - the outermost operation acquires the gate and opens the inner `LiteEngine`
+  - non-query operations are coordinated through the shared lease helpers
+  - shared-mode queries materialize their results under the lease, release the lease,
+    and only then yield to the caller
+- This removes the shared-mode self-deadlock when callers perform nested operations during
+  `await foreach` enumeration (for example `Insert`, `Delete`, `Update`, or nested queries
+  inside `FindAll()`).
+- `DisposeAsync()` now respects the shared-session lifecycle and only performs immediate
+  disposal when there is no active shared session.
+- `BeginTransaction` continues to throw `NotSupportedException` with an updated message.
 
 ### What is deferred
 
 - **Cross-process exclusive file coordination** (the original named-mutex purpose) is
   explicitly deferred. No hidden sync fallback exists. A future phase may introduce
   async-safe cross-process coordination (e.g. polling file-lock with `Task.Delay` retries).
-- **Explicit transaction scope** across multiple per-call open/close cycles is deferred;
-  the per-call lifecycle model does not support it without a deeper redesign.
+- **Explicit transaction scope** is still deferred; the reentrant lease model supports nested
+  single-call operations and streamed enumeration, but it does not expose explicit transaction
+  scope across arbitrary user code.
 
 ---
 
@@ -188,7 +195,7 @@ rebuild tool path.
 
 | Subsystem | Status |
 |---|---|
-| SharedEngine (in-process) | ✅ Redesigned — `SemaphoreSlim.WaitAsync` |
+| SharedEngine (in-process) | ✅ Redesigned — shared-session lease + buffered query enumeration over `SemaphoreSlim.WaitAsync` |
 | SharedEngine (cross-process) | 🔶 Deferred — named OS mutex cross-process coordination |
 | SharedDataReader | ✅ Complete (Phase 4, confirmed Phase 6) |
 | IFileReader / V7 / V8 | ✅ `IAsyncDisposable` added; enumeration deferred |

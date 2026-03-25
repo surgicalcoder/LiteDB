@@ -8,9 +8,11 @@ public class Issue2534_Tests
     [Fact]
     public async Task Test()
     {
+        using var file = new TempFile();
+
         await using LiteDatabase database = new(new ConnectionString
         {
-            Filename = "Demo.db",
+            Filename = file.Filename,
             Connection = ConnectionType.Shared
         });
 

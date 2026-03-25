@@ -71,11 +71,13 @@ Inspect current subsystem code including:
 
 ## Current Problem Summary
 
-The biggest unresolved subsystem is `SharedEngine`, which currently relies on:
+The biggest unresolved subsystem was `SharedEngine`, which historically relied on:
 
 - named `Mutex`
 - `WaitOne()`
 - sync open-per-call/close-per-call semantics
+
+The Phase 6 in-process redesign now uses an async gate plus a **shared-session lease** model. In shared mode, queries are materialized under that lease and only yielded to callers after the lease is released, so nested single-call operations inside `await foreach` do not self-deadlock.
 
 Other peripheral areas may already contain partial async work, but they are not necessarily aligned with the new architecture.
 
@@ -86,12 +88,13 @@ Other peripheral areas may already contain partial async work, but they are not 
 Choose one clearly and document it:
 
 #### Option A — redesign shared mode now
-Possible directions:
+Implemented direction:
 
-- async-compatible file-lock coordination
-- coordinator/broker model
-- serialized access service
-- another cross-process strategy not based on blocking named mutex waits
+- async-compatible in-process gate using `SemaphoreSlim.WaitAsync()`
+- shared-session lease in `SharedEngine`
+- buffered shared-mode query enumeration before caller-visible iteration
+- nested `Insert` / `Delete` / `Update` / query operations during streamed enumeration
+- cross-process coordination still explicitly deferred
 
 #### Option B — explicitly defer shared mode
 If deferred, do not leave a half-working sync fallback hidden inside the async architecture. Mark it clearly and contain the impact.
@@ -146,6 +149,7 @@ At the end of this phase, write a short markdown note describing:
 
 - Avoid blocking OS mutex wait patterns in async runtime paths
 - Prefer explicit redesign over compatibility hacks
+- Prefer reentrant shared-session leasing for nested operations over buffering full result sets
 - Defer a subsystem explicitly if correctness would otherwise be compromised
 - Keep the core engine architecture clean rather than preserving a sync edge case
 
@@ -159,6 +163,7 @@ At the end of this phase, write a short markdown note describing:
 ## Acceptance Criteria
 
 - No hidden sync-only shared mode path remains in the async core architecture
+- Shared mode supports nested single-call operations during streamed enumeration in the same async flow
 - Rebuild/file-reader/peripheral flows in scope align with the async-only model
 - Remaining unsupported/deferred areas are explicitly documented
 - No blocking waits remain in scoped operational paths unless clearly isolated and justified
