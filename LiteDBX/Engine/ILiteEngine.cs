@@ -49,10 +49,18 @@ public interface ILiteEngine : IAsyncDisposable
     /// </summary>
     IAsyncEnumerable<BsonDocument> Query(string collection, Query query, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Execute a query against <paramref name="collection"/> using the provided explicit transaction.
+    /// </summary>
+    IAsyncEnumerable<BsonDocument> Query(string collection, Query query, ILiteTransaction transaction, CancellationToken cancellationToken = default);
+
     // ── Write operations ──────────────────────────────────────────────────────
 
     /// <summary>Insert one or more documents. Returns the number of documents inserted.</summary>
     ValueTask<int> Insert(string collection, IEnumerable<BsonDocument> docs, BsonAutoId autoId, CancellationToken cancellationToken = default);
+
+    /// <summary>Insert one or more documents using the provided explicit transaction. Returns the number of documents inserted.</summary>
+    ValueTask<int> Insert(string collection, IEnumerable<BsonDocument> docs, BsonAutoId autoId, ILiteTransaction transaction, CancellationToken cancellationToken = default);
 
     /// <summary>Update a set of documents by <c>_id</c>. Returns the number of documents updated.</summary>
     ValueTask<int> Update(string collection, IEnumerable<BsonDocument> docs, CancellationToken cancellationToken = default);

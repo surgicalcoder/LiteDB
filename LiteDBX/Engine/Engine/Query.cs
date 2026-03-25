@@ -24,6 +24,16 @@ public partial class LiteEngine
         string collection,
         Query query,
         CancellationToken cancellationToken = default)
+        => Query(collection, query, null, cancellationToken);
+
+    /// <summary>
+    /// Run a query over a collection using the provided explicit transaction and stream matching documents.
+    /// </summary>
+    public IAsyncEnumerable<BsonDocument> Query(
+        string collection,
+        Query query,
+        ILiteTransaction transaction,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(collection))
             throw new ArgumentNullException(nameof(collection));
@@ -31,6 +41,8 @@ public partial class LiteEngine
             throw new ArgumentNullException(nameof(query));
 
         _state.Validate();
+
+        var service = transaction == null ? null : ResolveExplicitTransaction(transaction);
 
         IEnumerable<BsonDocument> source = null;
 
@@ -44,18 +56,19 @@ public partial class LiteEngine
             collection = sys.Name;
         }
 
-        return QueryCore(collection, query, source, cancellationToken);
+        return QueryCore(collection, query, source, service, cancellationToken);
     }
 
     private async IAsyncEnumerable<BsonDocument> QueryCore(
         string collection,
         Query query,
         IEnumerable<BsonDocument> source,
+        TransactionService transaction,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var exec = new QueryExecutor(
             this, _state, _monitor, _sortDisk, _disk, _header.Pragmas,
-            collection, query, source);
+            collection, query, source, transaction);
 
         await foreach (var doc in exec.ExecuteQuery(cancellationToken))
         {

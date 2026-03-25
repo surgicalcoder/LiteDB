@@ -28,13 +28,15 @@ public class LiteQueryable<T> : ILiteQueryable<T>
     private readonly bool _isSimpleType = Reflection.IsSimpleType(typeof(T));
     protected readonly BsonMapper _mapper;
     protected readonly Query _query;
+    private readonly ILiteTransaction _transaction;
 
-    internal LiteQueryable(ILiteEngine engine, BsonMapper mapper, string collection, Query query)
+    internal LiteQueryable(ILiteEngine engine, BsonMapper mapper, string collection, Query query, ILiteTransaction transaction = null)
     {
         _engine = engine;
         _mapper = mapper;
         _collection = collection;
         _query = query;
+        _transaction = transaction;
     }
 
     // ── Composition (synchronous — no I/O) ────────────────────────────────────
@@ -132,14 +134,14 @@ public class LiteQueryable<T> : ILiteQueryable<T>
     public ILiteQueryableResult<BsonDocument> Select(BsonExpression selector)
     {
         _query.Select = selector;
-        return new LiteQueryable<BsonDocument>(_engine, _mapper, _collection, _query);
+        return new LiteQueryable<BsonDocument>(_engine, _mapper, _collection, _query, _transaction);
     }
 
     public ILiteQueryableResult<K> Select<K>(Expression<Func<T, K>> selector)
     {
         if (_query.GroupBy != null) throw new ArgumentException("Use Select(BsonExpression selector) when using GroupBy query");
         _query.Select = _mapper.GetExpression(selector);
-        return new LiteQueryable<K>(_engine, _mapper, _collection, _query);
+        return new LiteQueryable<K>(_engine, _mapper, _collection, _query, _transaction);
     }
 
     #endregion
@@ -169,7 +171,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
     public ValueTask<IBsonDataReader> ExecuteReader(CancellationToken cancellationToken = default)
     {
         _query.ExplainPlan = false;
-        var stream = _engine.Query(_collection, _query, cancellationToken);
+        var stream = _engine.Query(_collection, _query, _transaction, cancellationToken);
         IBsonDataReader reader = new BsonDataReader(stream, _collection, cancellationToken);
         return new ValueTask<IBsonDataReader>(reader);
     }
@@ -184,7 +186,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
     {
         _query.ExplainPlan = false;
 
-        await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+        await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
         {
             yield return doc;
         }
@@ -201,7 +203,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
 
         if (_isSimpleType)
         {
-            await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+            await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
             {
                 var val = doc[doc.Keys.First()];
                 yield return (T)_mapper.Deserialize(typeof(T), val);
@@ -209,7 +211,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
         }
         else
         {
-            await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+            await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
             {
                 yield return (T)_mapper.Deserialize(typeof(T), doc);
             }
@@ -302,7 +304,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
         try
         {
             Select("{ count: COUNT(*._id) }");
-            await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+            await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
             {
                 return doc["count"].AsInt32;
             }
@@ -320,7 +322,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
         try
         {
             Select("{ count: COUNT(*._id) }");
-            await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+            await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
             {
                 return doc["count"].AsInt64;
             }
@@ -338,7 +340,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
         try
         {
             Select("{ exists: ANY(*._id) }");
-            await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+            await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
             {
                 return doc["exists"].AsBoolean;
             }
@@ -371,7 +373,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
         _query.IntoAutoId = autoId;
         _query.ExplainPlan = false;
 
-        await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+        await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
         {
             return doc["count"].AsInt32;
         }
@@ -392,7 +394,7 @@ public class LiteQueryable<T> : ILiteQueryable<T>
         _query.ExplainPlan = true;
         try
         {
-            await foreach (var doc in _engine.Query(_collection, _query, cancellationToken).ConfigureAwait(false))
+            await foreach (var doc in _engine.Query(_collection, _query, _transaction, cancellationToken).ConfigureAwait(false))
             {
                 return doc;
             }

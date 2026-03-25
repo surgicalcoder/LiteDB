@@ -21,7 +21,7 @@ namespace LiteDbX.Engine;
 ///     at the per-document level; only the transaction lock entry is a genuine async boundary.</item>
 /// </list>
 ///
-/// WAL read lock note: <see cref="Engine.Services.WalIndexService"/> still uses
+/// WAL read lock note: <see cref="WalIndexService"/> still uses
 /// <c>EnterReadSync</c> inside <c>CreateSnapshot</c>. Converting that to async is deferred to
 /// Phase 3 / Phase 6 (disk and shared-mode redesign).
 /// </summary>
@@ -47,7 +47,8 @@ internal class QueryExecutor
         EnginePragmas pragmas,
         string collection,
         Query query,
-        IEnumerable<BsonDocument> source)
+        IEnumerable<BsonDocument> source,
+        TransactionService transaction = null)
     {
         _engine = engine;
         _state = state;
@@ -59,9 +60,12 @@ internal class QueryExecutor
         _query = query;
         _cursor = new CursorInfo(collection, query);
         _source = source;
+        BoundTransaction = transaction;
 
         LOG(_query.ToSQL(_collection).Replace(Environment.NewLine, " "), "QUERY");
     }
+
+    internal TransactionService BoundTransaction { get; set; }
 
     // ── Public entry point ─────────────────────────────────────────────────────
 
@@ -95,9 +99,20 @@ internal class QueryExecutor
         bool executionPlan,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var (transaction, isNew) = await _monitor
-            .GetOrCreateTransactionAsync(true, cancellationToken)
-            .ConfigureAwait(false);
+        TransactionService transaction;
+        bool isNew;
+
+        if (BoundTransaction != null)
+        {
+            transaction = BoundTransaction;
+            isNew = false;
+        }
+        else
+        {
+            (transaction, isNew) = await _monitor
+                .GetOrCreateTransactionAsync(true, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         // Publish the transaction to synchronous system-collection sources running in this context.
         TransactionMonitor.SetCurrentTransaction(transaction);
@@ -130,7 +145,7 @@ internal class QueryExecutor
     ///
     /// Transaction lifecycle: the query transaction is acquired and fully released inside
     /// <see cref="ExecuteQueryCore"/>. The insert runs under a separate auto-transaction via
-    /// <see cref="LiteEngine.Insert"/>, so the two transactions are sequential, not nested.
+    /// the engine insert path, so the two transactions are sequential, not nested.
     /// </summary>
     private async IAsyncEnumerable<BsonDocument> ExecuteQueryInto(
         string into,
@@ -154,7 +169,7 @@ internal class QueryExecutor
         }
         else
         {
-            count = (int)await _engine
+            count = await _engine
                 .Insert(into, buffer, autoId, cancellationToken)
                 .ConfigureAwait(false);
         }

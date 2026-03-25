@@ -11,6 +11,24 @@ namespace LiteDbX.Tests.Engine;
 
 public class Transactions_Tests
 {
+    private static readonly TimeSpan CoordinationTimeout = TimeSpan.FromSeconds(5);
+
+    private static Task RunIsolated(Func<Task> action)
+    {
+        using (ExecutionContext.SuppressFlow())
+        {
+            return Task.Run(action);
+        }
+    }
+
+    private static async Task WaitForSignal(SemaphoreSlim semaphore, string description)
+    {
+        if (!await semaphore.WaitAsync(CoordinationTimeout))
+        {
+            throw new TimeoutException($"Timed out waiting for {description}.");
+        }
+    }
+
     /// <summary>
     /// Two concurrent tasks: task A holds a write transaction; task B should time out waiting
     /// for the lock.
@@ -31,31 +49,36 @@ public class Transactions_Tests
         var taskBSemaphore = new SemaphoreSlim(0, 1);
 
         // Task A: open explicit transaction, insert, signal B, wait, then commit
-        var ta = Task.Run(async () =>
+        var ta = RunIsolated(async () =>
         {
             await using var tx = await db.BeginTransaction();
-            await person.Insert(data2);
+            await person.Insert(data2, tx);
 
             taskBSemaphore.Release();
-            await taskASemaphore.WaitAsync();
+            await WaitForSignal(taskASemaphore, "task B to finish its lock-timeout assertion");
 
-            (await person.Count()).Should().Be(data1.Length + data2.Length);
+            (await person.Query(tx).Count()).Should().Be(data1.Length + data2.Length);
             await tx.Commit();
         });
 
         // Task B: should fail to acquire write lock within timeout
-        var tb = Task.Run(async () =>
+        var tb = RunIsolated(async () =>
         {
-            await taskBSemaphore.WaitAsync();
+            await WaitForSignal(taskBSemaphore, "task A to acquire the write transaction");
 
-            await db.Invoking(async d =>
+            try
             {
-                await using var tx = await d.BeginTransaction();
-                await person.DeleteMany("1 = 1");
-            }).Should().ThrowAsync<LiteException>()
-              .Where(ex => ex.ErrorCode == LiteException.LOCK_TIMEOUT);
-
-            taskASemaphore.Release();
+                await db.Invoking(async d =>
+                {
+                    await using var tx = await d.BeginTransaction();
+                    await person.DeleteMany("1 = 1");
+                }).Should().ThrowAsync<LiteException>()
+                  .Where(ex => ex.ErrorCode == LiteException.LOCK_TIMEOUT);
+            }
+            finally
+            {
+                taskASemaphore.Release();
+            }
         });
 
         await Task.WhenAll(ta, tb);
@@ -77,28 +100,40 @@ public class Transactions_Tests
         var taskASemaphore = new SemaphoreSlim(0, 1);
         var taskBSemaphore = new SemaphoreSlim(0, 1);
 
-        var ta = Task.Run(async () =>
+        var ta = RunIsolated(async () =>
         {
             await using var tx = await db.BeginTransaction();
-            await person.Insert(data2);
+            await person.Insert(data2, tx);
 
             taskBSemaphore.Release();
-            await taskASemaphore.WaitAsync();
+            await WaitForSignal(taskASemaphore, "task B to verify the pre-commit count");
 
-            (await person.Count()).Should().Be(data1.Length + data2.Length);
-            await tx.Commit();
-            taskBSemaphore.Release();
+            try
+            {
+                (await person.Query(tx).Count()).Should().Be(data1.Length + data2.Length);
+                await tx.Commit();
+            }
+            finally
+            {
+                taskBSemaphore.Release();
+            }
         });
 
-        var tb = Task.Run(async () =>
+        var tb = RunIsolated(async () =>
         {
-            await taskBSemaphore.WaitAsync();
+            await WaitForSignal(taskBSemaphore, "task A to stage uncommitted changes");
 
-            // outside any transaction — must see only the committed 100 docs
-            (await person.Count()).Should().Be(data1.Length);
+            try
+            {
+                // outside any transaction — must see only the committed 100 docs
+                (await person.Count()).Should().Be(data1.Length);
+            }
+            finally
+            {
+                taskASemaphore.Release();
+            }
 
-            taskASemaphore.Release();
-            await taskBSemaphore.WaitAsync();
+            await WaitForSignal(taskBSemaphore, "task A to finish committing");
 
             // after A committed — now 200 docs visible
             (await person.Count()).Should().Be(data1.Length + data2.Length);
@@ -123,30 +158,43 @@ public class Transactions_Tests
         var taskASemaphore = new SemaphoreSlim(0, 1);
         var taskBSemaphore = new SemaphoreSlim(0, 1);
 
-        var ta = Task.Run(async () =>
+        var ta = RunIsolated(async () =>
         {
             await using var tx = await db.BeginTransaction();
-            await person.Insert(data2);
+            await person.Insert(data2, tx);
 
             taskBSemaphore.Release();
-            await taskASemaphore.WaitAsync();
+            await WaitForSignal(taskASemaphore, "task B to verify its snapshot");
 
-            await tx.Commit();
-            taskBSemaphore.Release();
+            try
+            {
+                await tx.Commit();
+            }
+            finally
+            {
+                taskBSemaphore.Release();
+            }
         });
 
-        var tb = Task.Run(async () =>
+        var tb = RunIsolated(async () =>
         {
             await using var tx = await db.BeginTransaction();
 
-            await taskBSemaphore.WaitAsync();
-            (await person.Count()).Should().Be(data1.Length);
+            await WaitForSignal(taskBSemaphore, "task A to stage the concurrent write");
 
-            taskASemaphore.Release();
-            await taskBSemaphore.WaitAsync();
+            try
+            {
+                (await person.Query(tx).Count()).Should().Be(data1.Length);
+            }
+            finally
+            {
+                taskASemaphore.Release();
+            }
+
+            await WaitForSignal(taskBSemaphore, "task A to commit the concurrent write");
 
             // still in same transaction — snapshot must remain at 100 docs
-            (await person.Count()).Should().Be(data1.Length);
+            (await person.Query(tx).Count()).Should().Be(data1.Length);
         });
 
         await Task.WhenAll(ta, tb);
@@ -188,7 +236,7 @@ public class Transactions_Tests
 
         await using (var tx = await db.BeginTransaction())
         {
-            await col.Insert(DataGen.Person(1, 5).ToArray());
+            await col.Insert(DataGen.Person(1, 5).ToArray(), tx);
             // dispose without commit → rollback
         }
 

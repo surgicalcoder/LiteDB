@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
+using LiteDbX.Engine;
 
 namespace LiteDbX;
 
@@ -76,11 +77,20 @@ public interface ILiteCollection<T>
     /// <summary>Insert a new document. Returns the auto-generated or existing <c>_id</c>.</summary>
     ValueTask<BsonValue> Insert(T entity, CancellationToken cancellationToken = default);
 
+    /// <summary>Insert a new document using the provided explicit transaction.</summary>
+    ValueTask<BsonValue> Insert(T entity, ILiteTransaction transaction, CancellationToken cancellationToken = default);
+
     /// <summary>Insert a new document with an explicit <paramref name="id"/>.</summary>
     ValueTask Insert(BsonValue id, T entity, CancellationToken cancellationToken = default);
 
+    /// <summary>Insert a new document with an explicit <paramref name="id"/> using the provided explicit transaction.</summary>
+    ValueTask Insert(BsonValue id, T entity, ILiteTransaction transaction, CancellationToken cancellationToken = default);
+
     /// <summary>Insert a batch of documents. Returns the number inserted.</summary>
     ValueTask<int> Insert(IEnumerable<T> entities, CancellationToken cancellationToken = default);
+
+    /// <summary>Insert a batch of documents using the provided explicit transaction. Returns the number inserted.</summary>
+    ValueTask<int> Insert(IEnumerable<T> entities, ILiteTransaction transaction, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Bulk-insert documents in batches of <paramref name="batchSize"/>.
@@ -112,6 +122,12 @@ public interface ILiteCollection<T>
     /// Execution is deferred until a terminal async operation is called.
     /// </summary>
     ILiteQueryable<T> Query();
+
+    /// <summary>
+    /// Return a query builder bound to the provided explicit transaction.
+    /// Execution is deferred until a terminal async operation is called.
+    /// </summary>
+    ILiteQueryable<T> Query(ILiteTransaction transaction);
 
     // ── Find / Enumerate ──────────────────────────────────────────────────────
 

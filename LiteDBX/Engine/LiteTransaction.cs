@@ -41,6 +41,7 @@ internal sealed class LiteTransaction : ILiteTransaction
     // ── Internal access ───────────────────────────────────────────────────────
 
     internal TransactionService Service => _service;
+    internal TransactionMonitor Monitor => _monitor;
 
     // ── ILiteTransaction ──────────────────────────────────────────────────────
 

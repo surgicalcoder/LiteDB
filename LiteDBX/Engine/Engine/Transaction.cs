@@ -29,6 +29,42 @@ public partial class LiteEngine
         return new LiteTransaction(service, _monitor);
     }
 
+    private TransactionService ResolveExplicitTransaction(ILiteTransaction transaction)
+    {
+        _state.Validate();
+
+        if (transaction == null)
+        {
+            throw new ArgumentNullException(nameof(transaction));
+        }
+
+        if (transaction is not LiteTransaction liteTransaction)
+        {
+            throw new ArgumentException("Transaction must be created by LiteDbX.", nameof(transaction));
+        }
+
+        if (!ReferenceEquals(liteTransaction.Monitor, _monitor))
+        {
+            throw new ArgumentException("Transaction does not belong to this database instance.", nameof(transaction));
+        }
+
+        if (liteTransaction.Service.State != TransactionState.Active)
+        {
+            throw new LiteException(0, $"Transaction must be active (current state: {liteTransaction.Service.State})");
+        }
+
+        return liteTransaction.Service;
+    }
+
+    private ValueTask<T> ExplicitTransactionAsync<T>(
+        ILiteTransaction transaction,
+        Func<TransactionService, CancellationToken, ValueTask<T>> fn,
+        CancellationToken ct = default)
+    {
+        var service = ResolveExplicitTransaction(transaction);
+        return fn(service, ct);
+    }
+
     // ── Internal async transaction helpers ───────────────────────────────────
 
     /// <summary>

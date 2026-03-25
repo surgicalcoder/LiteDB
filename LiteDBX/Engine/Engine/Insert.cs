@@ -38,6 +38,40 @@ public partial class LiteEngine
     }
 
     /// <summary>
+    /// Insert all documents in collection using the provided explicit transaction.
+    /// </summary>
+    public ValueTask<int> Insert(string collection, IEnumerable<BsonDocument> docs, BsonAutoId autoId, ILiteTransaction transaction, CancellationToken cancellationToken = default)
+    {
+        if (transaction == null)
+        {
+            return Insert(collection, docs, autoId, cancellationToken);
+        }
+
+        if (collection.IsNullOrWhiteSpace()) throw new ArgumentNullException(nameof(collection));
+        if (docs == null) throw new ArgumentNullException(nameof(docs));
+
+        return ExplicitTransactionAsync(transaction, async (tx, ct) =>
+        {
+            var snapshot = await tx.CreateSnapshotAsync(LockMode.Write, collection, true, ct).ConfigureAwait(false);
+            var count = 0;
+            var indexer = new IndexService(snapshot, _header.Pragmas.Collation, _disk.MAX_ITEMS_COUNT);
+            var data = new DataService(snapshot, _disk.MAX_ITEMS_COUNT);
+
+            LOG($"insert `{collection}`", "COMMAND");
+
+            foreach (var doc in docs)
+            {
+                _state.Validate();
+                tx.Safepoint();
+                InsertDocument(snapshot, doc, autoId, indexer, data);
+                count++;
+            }
+
+            return count;
+        }, cancellationToken);
+    }
+
+    /// <summary>
     /// Internal implementation of insert a document
     /// </summary>
     private void InsertDocument(Snapshot snapshot, BsonDocument doc, BsonAutoId autoId, IndexService indexer, DataService data)

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using LiteDbX.Engine;
 
 namespace LiteDbX;
 
@@ -11,6 +12,12 @@ public partial class LiteCollection<T>
     /// Insert a new entity to this collection. Document Id must be a new value in collection - Returns document Id
     /// </summary>
     public async ValueTask<BsonValue> Insert(T entity, CancellationToken cancellationToken = default)
+        => await Insert(entity, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Insert a new entity to this collection using the provided explicit transaction.
+    /// </summary>
+    public async ValueTask<BsonValue> Insert(T entity, ILiteTransaction transaction, CancellationToken cancellationToken = default)
     {
         if (entity == null)
         {
@@ -20,7 +27,7 @@ public partial class LiteCollection<T>
         var doc = _mapper.ToDocument(entity);
         var removed = RemoveDocId(doc);
 
-        await _engine.Insert(Name, new[] { doc }, AutoId, cancellationToken).ConfigureAwait(false);
+        await _engine.Insert(Name, new[] { doc }, AutoId, transaction, cancellationToken).ConfigureAwait(false);
 
         var id = doc["_id"];
 
@@ -37,6 +44,12 @@ public partial class LiteCollection<T>
     /// Insert a new document to this collection using passed id value.
     /// </summary>
     public async ValueTask Insert(BsonValue id, T entity, CancellationToken cancellationToken = default)
+        => await Insert(id, entity, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Insert a new document to this collection using passed id value and explicit transaction.
+    /// </summary>
+    public async ValueTask Insert(BsonValue id, T entity, ILiteTransaction transaction, CancellationToken cancellationToken = default)
     {
         if (entity == null)
         {
@@ -52,7 +65,7 @@ public partial class LiteCollection<T>
 
         doc["_id"] = id;
 
-        await _engine.Insert(Name, new[] { doc }, AutoId, cancellationToken).ConfigureAwait(false);
+        await _engine.Insert(Name, new[] { doc }, AutoId, transaction, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -60,13 +73,19 @@ public partial class LiteCollection<T>
     /// size to commit at each N documents
     /// </summary>
     public async ValueTask<int> Insert(IEnumerable<T> entities, CancellationToken cancellationToken = default)
+        => await Insert(entities, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Insert an array of new documents to this collection using the provided explicit transaction.
+    /// </summary>
+    public async ValueTask<int> Insert(IEnumerable<T> entities, ILiteTransaction transaction, CancellationToken cancellationToken = default)
     {
         if (entities == null)
         {
             throw new ArgumentNullException(nameof(entities));
         }
 
-        return (int)await _engine.Insert(Name, GetBsonDocs(entities), AutoId, cancellationToken).ConfigureAwait(false);
+        return await _engine.Insert(Name, GetBsonDocs(entities), AutoId, transaction, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -89,14 +108,14 @@ public partial class LiteCollection<T>
 
             if (batch.Count >= batchSize)
             {
-                count += (int)await _engine.Insert(Name, GetBsonDocs(batch), AutoId, cancellationToken).ConfigureAwait(false);
+                count += await _engine.Insert(Name, GetBsonDocs(batch), AutoId, cancellationToken).ConfigureAwait(false);
                 batch.Clear();
             }
         }
 
         if (batch.Count > 0)
         {
-            count += (int)await _engine.Insert(Name, GetBsonDocs(batch), AutoId, cancellationToken).ConfigureAwait(false);
+            count += await _engine.Insert(Name, GetBsonDocs(batch), AutoId, cancellationToken).ConfigureAwait(false);
         }
 
         return count;

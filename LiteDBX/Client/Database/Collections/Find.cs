@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
+using LiteDbX.Engine;
 
 namespace LiteDbX;
 
@@ -13,7 +14,15 @@ public partial class LiteCollection<T>
     /// </summary>
     public ILiteQueryable<T> Query()
     {
-        return new LiteQueryable<T>(_engine, _mapper, Name, new Query()).Include(_includes);
+        return Query(null);
+    }
+
+    /// <summary>
+    /// Return a new LiteQueryable bound to the provided explicit transaction.
+    /// </summary>
+    public ILiteQueryable<T> Query(ILiteTransaction transaction)
+    {
+        return new LiteQueryable<T>(_engine, _mapper, Name, new Query(), transaction).Include(_includes);
     }
 
     #region Find

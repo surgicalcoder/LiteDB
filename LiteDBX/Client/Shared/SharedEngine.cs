@@ -171,6 +171,22 @@ public class SharedEngine : ILiteEngine
         return QueryStream(collection, query, cancellationToken);
     }
 
+    public IAsyncEnumerable<BsonDocument> Query(
+        string collection,
+        Query query,
+        ILiteTransaction transaction,
+        CancellationToken cancellationToken = default)
+    {
+        if (transaction != null)
+        {
+            throw new NotSupportedException(
+                "Explicit transaction-bound queries are not supported in SharedEngine. " +
+                "Use a dedicated LiteEngine/LiteDatabase instance for transaction scope.");
+        }
+
+        return Query(collection, query, cancellationToken);
+    }
+
     private async IAsyncEnumerable<BsonDocument> QueryStream(
         string collection,
         Query query,
@@ -195,6 +211,18 @@ public class SharedEngine : ILiteEngine
 
     public ValueTask<int> Insert(string collection, IEnumerable<BsonDocument> docs, BsonAutoId autoId, CancellationToken cancellationToken = default)
         => QueryDatabaseAsync(() => _engine.Insert(collection, docs, autoId, cancellationToken), cancellationToken);
+
+    public ValueTask<int> Insert(string collection, IEnumerable<BsonDocument> docs, BsonAutoId autoId, ILiteTransaction transaction, CancellationToken cancellationToken = default)
+    {
+        if (transaction != null)
+        {
+            throw new NotSupportedException(
+                "Explicit transaction-bound inserts are not supported in SharedEngine. " +
+                "Use a dedicated LiteEngine/LiteDatabase instance for transaction scope.");
+        }
+
+        return Insert(collection, docs, autoId, cancellationToken);
+    }
 
     public ValueTask<int> Update(string collection, IEnumerable<BsonDocument> docs, CancellationToken cancellationToken = default)
         => QueryDatabaseAsync(() => _engine.Update(collection, docs, cancellationToken), cancellationToken);

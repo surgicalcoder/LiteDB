@@ -69,10 +69,10 @@ internal class TransactionMonitor : IDisposable
     /// Get or create a transaction for the current async execution context.
     ///
     /// If an explicit <see cref="LiteTransaction"/> is ambient (from <see cref="LiteEngine.BeginTransaction"/>),
-    /// it is reused (<paramref name="isNew"/> = <c>false</c>).
+    /// it is reused for non-query operations (<c>isNew = false</c>).
     ///
     /// Otherwise a new auto-transaction is created, entered into the transaction gate, and tracked.
-    /// The caller is responsible for committing and releasing it when <paramref name="isNew"/> is <c>true</c>.
+    /// The caller is responsible for committing and releasing it when <c>isNew</c> is <c>true</c>.
     /// </summary>
     public async ValueTask<(TransactionService transaction, bool isNew)> GetOrCreateTransactionAsync(
         bool queryOnly,
