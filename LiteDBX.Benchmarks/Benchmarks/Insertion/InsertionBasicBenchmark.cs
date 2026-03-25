@@ -14,12 +14,14 @@ namespace LiteDbX.Benchmarks.Benchmarks.Insertion
         private ILiteCollection<FileMetaBase> _fileMetaCollection;
 
         [GlobalSetup]
-        public async Task GlobalSetup()
+        public Task GlobalSetup()
         {
             File.Delete(DatabasePath);
             DatabaseInstance = new LiteDatabase(ConnectionString());
             _fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
             _data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize);
+
+            return Task.CompletedTask;
         }
 
         [Benchmark(Baseline = true)]
@@ -59,7 +61,12 @@ namespace LiteDbX.Benchmarks.Benchmarks.Insertion
         }
 
         [IterationCleanup]
-        public async Task IterationCleanup()
+        public void IterationCleanup()
+        {
+            IterationCleanupAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task IterationCleanupAsync()
         {
             await DatabaseInstance.DropCollection(nameof(FileMetaBase));
             await DatabaseInstance.Checkpoint();

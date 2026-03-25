@@ -24,9 +24,14 @@ namespace LiteDbX.Benchmarks.Benchmarks.Deletion
             await _fileMetaCollection.EnsureIndex(file => file.ShouldBeShown);
             _data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize);
         }
-
+        
         [IterationSetup]
-        public async Task IterationSetup()
+        public void IterationSetup()
+        {
+            IterationSetupAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task IterationSetupAsync()
         {
             await _fileMetaCollection.Insert(_data);
             await DatabaseInstance.Checkpoint();

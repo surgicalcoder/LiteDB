@@ -59,7 +59,12 @@ namespace LiteDbX.Benchmarks.Benchmarks.Insertion
         }
 
         [IterationCleanup]
-        public async Task IterationCleanup()
+        public void IterationCleanup()
+        {
+            IterationCleanupAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task IterationCleanupAsync()
         {
             var indexesCollection = DatabaseInstance.GetCollection("$indexes");
             var droppedCollectionIndexes = await indexesCollection.Query()
