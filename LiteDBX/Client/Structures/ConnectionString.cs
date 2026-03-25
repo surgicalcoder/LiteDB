@@ -109,7 +109,7 @@ public class ConnectionString
     public string this[string key] => _values.GetOrDefault(key);
 
     /// <summary>
-    /// Create ILiteEngine instance according string connection parameters. For now, only Local/Shared are supported
+    /// Create ILiteEngine instance according string connection parameters. Direct, Shared and LockFile are supported.
     /// </summary>
     internal ILiteEngine CreateEngine(Action<EngineSettings> engineSettingsAction = null)
     {
@@ -135,6 +135,11 @@ public class ConnectionString
         if (Connection == ConnectionType.Shared)
         {
             return new SharedEngine(settings);
+        }
+
+        if (Connection == ConnectionType.LockFile)
+        {
+            return new LockFileEngine(settings);
         }
 
         throw new NotImplementedException();

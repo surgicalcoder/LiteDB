@@ -47,6 +47,14 @@ internal static class FileHelper
     }
 
     /// <summary>
+    /// Get LOCK file based on data file
+    /// </summary>
+    public static string GetLockFile(string filename)
+    {
+        return GetSuffixFile(filename, "-lock", false);
+    }
+
+    /// <summary>
     /// Test if file are used by any process
     /// </summary>
     public static bool IsFileLocked(string filename)

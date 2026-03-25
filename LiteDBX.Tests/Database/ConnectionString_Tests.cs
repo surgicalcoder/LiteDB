@@ -31,6 +31,10 @@ public class ConnectionString_Tests
         full.Password.Should().Be("john-doe ");
         full.ReadOnly.Should().BeTrue();
         full.InitialSize.Should().Be(10 * 1024 * 1024);
+
+        var lockFile = new ConnectionString(@"filename=demo.db;connection=LockFile");
+
+        lockFile.Connection.Should().Be(ConnectionType.LockFile);
     }
 
     [Fact]

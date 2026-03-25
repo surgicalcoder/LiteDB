@@ -3,8 +3,8 @@
 public enum ConnectionType
 {
     Direct,
-
-    Shared
+    Shared,
+    LockFile
     // MimePipes
     // Tcp
     // Rest

@@ -7,10 +7,12 @@ namespace LiteDbX.Tests.Engine;
 
 public class Recursion_Tests
 {
-    [Fact]
-    public async Task UpdateInFindAll()
+    [Theory]
+    [InlineData(ConnectionType.Shared)]
+    [InlineData(ConnectionType.LockFile)]
+    public async Task UpdateInFindAll(ConnectionType connectionType)
     {
-        await Test(async collection =>
+        await Test(connectionType, async collection =>
         {
             var updated = 0;
 
@@ -25,10 +27,12 @@ public class Recursion_Tests
         });
     }
 
-    [Fact]
-    public async Task InsertDeleteInFindAll()
+    [Theory]
+    [InlineData(ConnectionType.Shared)]
+    [InlineData(ConnectionType.LockFile)]
+    public async Task InsertDeleteInFindAll(ConnectionType connectionType)
     {
-        await Test(async collection =>
+        await Test(connectionType, async collection =>
         {
             var iterations = 0;
 
@@ -44,10 +48,12 @@ public class Recursion_Tests
         });
     }
 
-    [Fact]
-    public async Task QueryInFindAll()
+    [Theory]
+    [InlineData(ConnectionType.Shared)]
+    [InlineData(ConnectionType.LockFile)]
+    public async Task QueryInFindAll(ConnectionType connectionType)
     {
-        await Test(async collection =>
+        await Test(connectionType, async collection =>
         {
             var iterations = 0;
 
@@ -61,10 +67,12 @@ public class Recursion_Tests
         });
     }
 
-    [Fact]
-    public async Task BreakInFindAll_ReleasesSharedLease()
+    [Theory]
+    [InlineData(ConnectionType.Shared)]
+    [InlineData(ConnectionType.LockFile)]
+    public async Task BreakInFindAll_ReleasesSharedLease(ConnectionType connectionType)
     {
-        await Test(async collection =>
+        await Test(connectionType, async collection =>
         {
             var iterations = 0;
 
@@ -82,14 +90,14 @@ public class Recursion_Tests
         });
     }
 
-    private static async Task Test(Func<ILiteCollection<BsonDocument>, Task> action)
+    private static async Task Test(ConnectionType connectionType, Func<ILiteCollection<BsonDocument>, Task> action)
     {
         using var file = new TempFile();
 
         await using var database = new LiteDatabase(new ConnectionString
         {
             Filename = file.Filename,
-            Connection = ConnectionType.Shared
+            Connection = connectionType
         });
 
         var accounts = database.GetCollection("Recursion");
