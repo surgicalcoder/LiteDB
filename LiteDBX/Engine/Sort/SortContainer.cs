@@ -11,6 +11,7 @@ internal class SortContainer : IDisposable
 {
     private static readonly ArrayPool<byte> _bufferPool = ArrayPool<byte>.Shared;
     private readonly Collation _collation;
+    private readonly int[] _orders;
     private readonly int _size;
 
     private BufferReader _reader;
@@ -24,9 +25,10 @@ internal class SortContainer : IDisposable
     /// </summary>
     public KeyValuePair<BsonValue, PageAddress> Current;
 
-    public SortContainer(Collation collation, int size)
+    public SortContainer(Collation collation, int size, IReadOnlyList<int> orders)
     {
         _collation = collation;
+        _orders = orders as int[] ?? orders.ToArray();
         _size = size;
     }
 
@@ -106,6 +108,12 @@ internal class SortContainer : IDisposable
         }
 
         var key = _reader.ReadIndexKey();
+
+        if (_orders.Length > 1)
+        {
+            key = SortKey.FromBsonValue(key, _orders);
+        }
+
         var value = _reader.ReadPageAddress();
 
         Current = new KeyValuePair<BsonValue, PageAddress>(key, value);

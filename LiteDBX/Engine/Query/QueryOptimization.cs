@@ -88,7 +88,10 @@ internal class QueryOptimization
         fields.AddRange(_query.Includes.SelectMany(x => x.Fields));
         fields.AddRange(_query.GroupBy?.Fields);
         fields.AddRange(_query.Having?.Fields);
-        fields.AddRange(_query.OrderBy?.Fields);
+        if (_query.OrderBy.Count > 0)
+        {
+            fields.AddRange(_query.OrderBy.SelectMany(x => x.Expression.Fields));
+        }
 
         // if contains $, all fields must be deserialized
         if (fields.Contains("$"))
@@ -113,7 +116,7 @@ internal class QueryOptimization
 
             // test if field are using in any filter or orderBy
             var used = _queryPlan.Filters.Any(x => x.Fields.Contains(field)) ||
-                       (_queryPlan.OrderBy?.Expression.Fields.Contains(field) ?? false);
+                       (_queryPlan.OrderBy?.ContainsField(field) ?? false);
 
             if (used)
             {
@@ -335,11 +338,12 @@ internal class QueryOptimization
         }
 
         // if no index found, try use same index in orderby/groupby/preferred
-        if (lowest == null && (_query.OrderBy != null || _query.GroupBy != null || preferred != null))
+        if (lowest == null && (_query.OrderBy.Count > 0 || _query.GroupBy != null || preferred != null))
         {
+            var orderByExpr = _query.OrderBy.Count > 0 ? _query.OrderBy[0].Expression.Source : null;
             var index =
                 indexes.FirstOrDefault(x => x.Expression == _query.GroupBy?.Source) ??
-                indexes.FirstOrDefault(x => x.Expression == _query.OrderBy?.Source) ??
+                indexes.FirstOrDefault(x => x.Expression == orderByExpr) ??
                 indexes.FirstOrDefault(x => x.Expression == preferred);
 
             if (index != null)
@@ -361,22 +365,22 @@ internal class QueryOptimization
     private void DefineOrderBy()
     {
         // if has no order by, returns null
-        if (_query.OrderBy == null)
+        if (_query.OrderBy.Count == 0)
         {
             return;
         }
 
-        var orderBy = new OrderBy(_query.OrderBy, _query.Order);
+        var orderBy = new OrderBy(_query.OrderBy.Select(x => new OrderByItem(x.Expression, x.Order)));
 
-        // if index expression are same as orderBy, use index to sort - just update index order
-        if (orderBy.Expression.Source == _queryPlan.IndexExpression)
+        // if index expression are same as primary OrderBy segment, use index order configuration
+        if (orderBy.PrimaryExpression.Source == _queryPlan.IndexExpression)
         {
-            // re-use index order and no not run OrderBy
-            // update index order to be same as required in OrderBy
-            _queryPlan.Index.Order = orderBy.Order;
+            _queryPlan.Index.Order = orderBy.PrimaryOrder;
 
-            // in this case "query.OrderBy" will be null
-            orderBy = null;
+            if (orderBy.Segments.Count == 1)
+            {
+                orderBy = null;
+            }
         }
 
         // otherwise, query.OrderBy will be setted according user defined
@@ -393,7 +397,7 @@ internal class QueryOptimization
             return;
         }
 
-        if (_query.OrderBy != null)
+        if (_query.OrderBy.Count > 0)
         {
             throw new NotSupportedException("GROUP BY expression do not support ORDER BY");
         }
@@ -414,7 +418,7 @@ internal class QueryOptimization
         else
         {
             // create orderBy expression
-            orderBy = new OrderBy(groupBy.Expression, Query.Ascending);
+            orderBy = new OrderBy(new[] { new OrderByItem(groupBy.Expression, Query.Ascending) });
         }
 
         _queryPlan.GroupBy = groupBy;

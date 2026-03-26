@@ -112,9 +112,8 @@ public class LiteQueryable<T> : ILiteQueryable<T>
 
     public ILiteQueryable<T> OrderBy(BsonExpression keySelector, int order = Query.Ascending)
     {
-        if (_query.OrderBy != null) throw new ArgumentException("ORDER BY already defined in this query builder");
-        _query.OrderBy = keySelector;
-        _query.Order = order;
+        if (_query.OrderBy.Count > 0) throw new ArgumentException("ORDER BY already defined in this query builder");
+        _query.OrderBy.Add(new QueryOrder(keySelector, order));
         return this;
     }
 
@@ -126,6 +125,32 @@ public class LiteQueryable<T> : ILiteQueryable<T>
     public ILiteQueryable<T> OrderByDescending(BsonExpression keySelector) => OrderBy(keySelector, Query.Descending);
 
     public ILiteQueryable<T> OrderByDescending<K>(Expression<Func<T, K>> keySelector) => OrderBy(keySelector, Query.Descending);
+
+    public ILiteQueryable<T> ThenBy(BsonExpression keySelector)
+    {
+        if (_query.OrderBy.Count == 0) return OrderBy(keySelector, Query.Ascending);
+
+        _query.OrderBy.Add(new QueryOrder(keySelector, Query.Ascending));
+        return this;
+    }
+
+    public ILiteQueryable<T> ThenBy<K>(Expression<Func<T, K>> keySelector)
+    {
+        return ThenBy(_mapper.GetExpression(keySelector));
+    }
+
+    public ILiteQueryable<T> ThenByDescending(BsonExpression keySelector)
+    {
+        if (_query.OrderBy.Count == 0) return OrderBy(keySelector, Query.Descending);
+
+        _query.OrderBy.Add(new QueryOrder(keySelector, Query.Descending));
+        return this;
+    }
+
+    public ILiteQueryable<T> ThenByDescending<K>(Expression<Func<T, K>> keySelector)
+    {
+        return ThenByDescending(_mapper.GetExpression(keySelector));
+    }
 
     #endregion
 

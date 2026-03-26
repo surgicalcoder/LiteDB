@@ -77,4 +77,78 @@ public class OrderBy_Tests
         asc[0].Id.Should().Be(1);
         desc[0].Id.Should().Be(1000);
     }
+
+    [Fact]
+    public async Task Query_OrderBy_ThenBy_Multiple_Keys()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, local) = db.GetData();
+
+        await collection.EnsureIndex(x => x.Age);
+
+        var expected = local
+            .OrderBy(x => x.Age)
+            .ThenByDescending(x => x.Name)
+            .Select(x => new { x.Age, x.Name })
+            .ToArray();
+
+        var actual = await collection.Query()
+            .OrderBy(x => x.Age)
+            .ThenByDescending(x => x.Name)
+            .Select(x => new { x.Age, x.Name })
+            .ToArray();
+
+        actual.Should().Equal(expected);
+
+        var plan = await collection.Query()
+            .OrderBy(x => x.Age)
+            .ThenByDescending(x => x.Name)
+            .GetPlan();
+
+        plan["index"]["order"].AsInt32.Should().Be(Query.Ascending);
+
+        var orderBy = plan["orderBy"].AsArray;
+
+        orderBy.Count.Should().Be(2);
+        orderBy[0]["expr"].AsString.Should().Be("$.Age");
+        orderBy[0]["order"].AsInt32.Should().Be(Query.Ascending);
+        orderBy[1]["expr"].AsString.Should().Be("$.Name");
+        orderBy[1]["order"].AsInt32.Should().Be(Query.Descending);
+    }
+
+    [Fact]
+    public async Task Query_OrderByDescending_ThenBy_Index_Order_Applied()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, local) = db.GetData();
+
+        await collection.EnsureIndex(x => x.Name);
+
+        var expected = local
+            .OrderByDescending(x => x.Name)
+            .ThenBy(x => x.Age)
+            .Select(x => new { x.Name, x.Age })
+            .ToArray();
+
+        var actual = await collection.Query()
+            .OrderByDescending(x => x.Name)
+            .ThenBy(x => x.Age)
+            .Select(x => new { x.Name, x.Age })
+            .ToArray();
+
+        actual.Should().Equal(expected);
+
+        var plan = await collection.Query()
+            .OrderByDescending(x => x.Name)
+            .ThenBy(x => x.Age)
+            .GetPlan();
+
+        plan["index"]["order"].AsInt32.Should().Be(Query.Descending);
+
+        var orderBy = plan["orderBy"].AsArray;
+
+        orderBy.Count.Should().Be(2);
+        orderBy[0]["order"].AsInt32.Should().Be(Query.Descending);
+        orderBy[1]["order"].AsInt32.Should().Be(Query.Ascending);
+    }
 }

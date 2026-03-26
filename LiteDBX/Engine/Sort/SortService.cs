@@ -20,14 +20,17 @@ internal class SortService : IDisposable
     private readonly SortDisk _disk;
     private readonly Done _done = new() { Running = true };
 
-    private readonly int _order;
+    private readonly int[] _orders;
     private readonly EnginePragmas _pragmas;
     private readonly Lazy<Stream> _reader;
 
-    public SortService(SortDisk disk, int order, EnginePragmas pragmas)
+    public SortService(SortDisk disk, IReadOnlyList<int> orders, EnginePragmas pragmas)
     {
         _disk = disk;
-        _order = order;
+        if (orders == null) throw new ArgumentNullException(nameof(orders));
+        if (orders.Count == 0) throw new ArgumentException("Orders must contain at least one segment", nameof(orders));
+
+        _orders = orders as int[] ?? orders.ToArray();
         _pragmas = pragmas;
         _containerSize = disk.ContainerSize;
 
@@ -77,10 +80,12 @@ internal class SortService : IDisposable
         // slit all items in sorted containers
         foreach (var containerItems in SliptValues(items, _done))
         {
-            var container = new SortContainer(_pragmas.Collation, _containerSize);
+            var container = new SortContainer(_pragmas.Collation, _containerSize, _orders);
 
             // insert segmented items inside a container - reuse same buffer slice
-            container.Insert(containerItems, _order, _buffer);
+            var order = _orders.Length == 1 ? _orders[0] : Query.Ascending;
+
+            container.Insert(containerItems, order, _buffer);
 
             _containers.Add(container);
 
@@ -126,7 +131,7 @@ internal class SortService : IDisposable
         }
         else
         {
-            var diffOrder = _order * -1;
+            var diffOrder = _orders.Length == 1 ? _orders[0] * -1 : -1;
 
             // merge sort with all containers
             while (_containers.Any(x => !x.IsEOF))

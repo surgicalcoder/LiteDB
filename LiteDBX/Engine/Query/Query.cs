@@ -14,8 +14,7 @@ public partial class Query
     public List<BsonExpression> Includes { get; } = new();
     public List<BsonExpression> Where { get; } = new();
 
-    public BsonExpression OrderBy { get; set; } = null;
-    public int Order { get; set; } = Ascending;
+    public List<QueryOrder> OrderBy { get; } = new();
 
     public BsonExpression GroupBy { get; set; } = null;
     public BsonExpression Having { get; set; } = null;
@@ -81,9 +80,12 @@ public partial class Query
             sb.AppendLine($"HAVING {Having.Source}");
         }
 
-        if (OrderBy != null)
+        if (OrderBy.Count > 0)
         {
-            sb.AppendLine($"ORDER BY {OrderBy.Source} {(Order == Ascending ? "ASC" : "DESC")}");
+            var orderBy = OrderBy
+                .Select(x => $"{x.Expression.Source} {(x.Order == Ascending ? "ASC" : "DESC")}");
+
+            sb.AppendLine($"ORDER BY {string.Join(", ", orderBy)}");
         }
 
         if (Limit != int.MaxValue)

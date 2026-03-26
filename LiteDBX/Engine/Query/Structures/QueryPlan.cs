@@ -133,11 +133,11 @@ internal class QueryPlan
 
         if (OrderBy != null)
         {
-            doc["orderBy"] = new BsonDocument
+            doc["orderBy"] = new BsonArray(OrderBy.Segments.Select(x => new BsonDocument
             {
-                ["expr"] = OrderBy.Expression.Source,
-                ["order"] = OrderBy.Order
-            };
+                ["expr"] = x.Expression.Source,
+                ["order"] = x.Order
+            }));
         }
 
         if (Limit != int.MaxValue)

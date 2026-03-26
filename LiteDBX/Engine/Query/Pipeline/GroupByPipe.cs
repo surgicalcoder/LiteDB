@@ -41,7 +41,7 @@ internal class GroupByPipe : BasePipe
         // run orderBy used in GroupBy (if not already ordered by index)
         if (query.OrderBy != null)
         {
-            source = OrderBy(source, query.OrderBy.Expression, query.OrderBy.Order, 0, int.MaxValue);
+            source = OrderBy(source, query.OrderBy, 0, int.MaxValue);
         }
 
         // apply groupby

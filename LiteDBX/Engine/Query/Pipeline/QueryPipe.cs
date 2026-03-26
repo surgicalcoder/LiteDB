@@ -48,7 +48,7 @@ internal class QueryPipe : BasePipe
         if (query.OrderBy != null)
         {
             // pipe: orderby with offset+limit
-            source = OrderBy(source, query.OrderBy.Expression, query.OrderBy.Order, query.Offset, query.Limit);
+            source = OrderBy(source, query.OrderBy, query.Offset, query.Limit);
         }
         else
         {

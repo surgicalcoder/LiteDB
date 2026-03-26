@@ -31,6 +31,10 @@ public interface ILiteQueryable<T> : ILiteQueryableResult<T>
     ILiteQueryable<T> OrderBy<K>(Expression<Func<T, K>> keySelector, int order = 1);
     ILiteQueryable<T> OrderByDescending(BsonExpression keySelector);
     ILiteQueryable<T> OrderByDescending<K>(Expression<Func<T, K>> keySelector);
+    ILiteQueryable<T> ThenBy(BsonExpression keySelector);
+    ILiteQueryable<T> ThenBy<K>(Expression<Func<T, K>> keySelector);
+    ILiteQueryable<T> ThenByDescending(BsonExpression keySelector);
+    ILiteQueryable<T> ThenByDescending<K>(Expression<Func<T, K>> keySelector);
 
     // ── Group ─────────────────────────────────────────────────────────────────
     ILiteQueryable<T> GroupBy(BsonExpression keySelector);

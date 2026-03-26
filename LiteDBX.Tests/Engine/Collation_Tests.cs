@@ -61,7 +61,10 @@ public class Collation_Tests
         await e.Insert("col1", names.Select(x => new BsonDocument { ["name"] = x }), BsonAutoId.Int32);
 
         // sort by merge sort
-        var sortByOrderByName = await e.Query("col1", new Query { OrderBy = "name" })
+        var orderQuery = new Query();
+        orderQuery.OrderBy.Add(new QueryOrder("name", Query.Ascending));
+
+        var sortByOrderByName = await e.Query("col1", orderQuery)
                                         .Select(x => x["name"].AsString)
                                         .ToListAsync();
 
@@ -78,7 +81,10 @@ public class Collation_Tests
         // index test
         await e.EnsureIndex("col1", "idx_name", "name", false);
 
-        var sortByIndexName = await e.Query("col1", new Query { OrderBy = "name" })
+        var indexOrderQuery = new Query();
+        indexOrderQuery.OrderBy.Add(new QueryOrder("name", Query.Ascending));
+
+        var sortByIndexName = await e.Query("col1", indexOrderQuery)
                                       .Select(x => x["name"].AsString)
                                       .ToListAsync();
 
