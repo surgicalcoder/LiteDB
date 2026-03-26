@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using LiteDbX.Engine;
 
 namespace LiteDbX;
@@ -61,4 +62,14 @@ public sealed partial class LiteCollection<T> : ILiteCollection<T>
     /// Getting entity mapper from current collection. Returns null if collection are BsonDocument type
     /// </summary>
     public EntityMapper EntityMapper { get; }
+
+    private string GetFieldExpression<K>(Expression<Func<T, K>> field)
+    {
+        if (field == null)
+        {
+            throw new ArgumentNullException(nameof(field));
+        }
+
+        return _mapper.GetExpression(field).Source;
+    }
 }

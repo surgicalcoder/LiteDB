@@ -6,6 +6,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using LiteDbX.Spatial;
 using Xunit;
 
 namespace LiteDbX.Tests.Mapper;
@@ -118,11 +119,11 @@ public class LinqBsonExpression_Tests
 
         // contains
         TestExpr<User>(x => x.PhoneNumbers.Contains(1234), "PhoneNumbers ANY = @p0", 1234);
-        TestExpr<User>(x => x.Phones2.Contains(new Phone { Number = 1 }), "Phones2 ANY = { Number: @p0 }", 1);
+        TestExpr<User>(x => Enumerable.Contains(x.Phones2, new Phone { Number = 1 }), "Phones2 ANY = { Number: @p0 }", 1);
 
         // negated contains
         TestExpr<User>(x => !x.PhoneNumbers.Contains(1234), "(PhoneNumbers ANY = @p0) = false", 1234);
-        TestExpr<User>(x => !x.Phones2.Contains(new Phone { Number = 1 }), "(Phones2 ANY = { Number: @p0 }) = false", 1);
+        TestExpr<User>(x => !Enumerable.Contains(x.Phones2, new Phone { Number = 1 }), "(Phones2 ANY = { Number: @p0 }) = false", 1);
 
         // fixed position with filter expression
         TestExpr<User>(x => x.Phones.First(p => p.Number == 1), "FIRST(FILTER($.Phones=>(@.Number=@p0)))", 1);
@@ -410,6 +411,25 @@ public class LinqBsonExpression_Tests
     }
 
     [Fact]
+    public void Linq_Spatial_Methods()
+    {
+        LiteDbX.Spatial.Spatial.Register(_mapper);
+
+        var center = new GeoPoint(48.2082, 16.3738);
+        var polygon = new GeoPolygon(new[]
+        {
+            new GeoPoint(48.25, 16.30),
+            new GeoPoint(48.25, 16.45),
+            new GeoPoint(48.15, 16.45),
+            new GeoPoint(48.15, 16.30),
+            new GeoPoint(48.25, 16.30)
+        });
+
+        TestPredicate<Place>(x => LiteDbX.Spatial.Spatial.Near(x.Location, center, 1000d), $"(SPATIAL_NEAR(Location, @p0, @p1, '{LiteDbX.Spatial.Spatial.Options.Distance}') = true)", _mapper.Serialize(center), 1000d);
+        TestPredicate<Place>(x => LiteDbX.Spatial.Spatial.Within(x.Location, polygon), "(SPATIAL_WITHIN(Location, @p0) = true)", _mapper.Serialize(polygon));
+    }
+
+    [Fact]
     public void Linq_InvocationExpression()
     {
         Expression<Func<User, bool>> expr = x => x.Id >= 1 && x.Id <= 10;
@@ -517,6 +537,11 @@ public class LinqBsonExpression_Tests
         public ObjectId Id { get; set; }
 
         public string Name { get; set; }
+    }
+
+    public class Place
+    {
+        public GeoPoint Location { get; set; }
     }
 
     private static Address StaticProp { get; } = new() { Number = 99 };

@@ -31,7 +31,9 @@ internal class LinqExpressionVisitor : ExpressionVisitor
         [typeof(Regex)] = new RegexResolver(),
         [typeof(ObjectId)] = new ObjectIdResolver(),
         [typeof(string)] = new StringResolver(),
-        [typeof(Nullable)] = new NullableResolver()
+        [typeof(Nullable)] = new NullableResolver(),
+        [typeof(LiteDbX.Spatial.Spatial)] = new SpatialResolver(),
+        [typeof(LiteDbX.SpatialExpressions)] = new SpatialResolver()
     };
 
     private readonly StringBuilder _builder = new();

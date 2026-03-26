@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
+using LiteDbX.Spatial;
 using LiteDbX.Engine;
 
 namespace LiteDbX;
@@ -117,6 +118,60 @@ public partial class LiteCollection<T>
     public IAsyncEnumerable<T> FindAll(CancellationToken cancellationToken = default)
     {
         return Query().Include(_includes).ToEnumerable(cancellationToken);
+    }
+
+    public IAsyncEnumerable<T> FindNear(
+        Expression<Func<T, GeoPoint>> field,
+        GeoPoint center,
+        double radiusMeters,
+        int skip = 0,
+        int limit = int.MaxValue,
+        CancellationToken cancellationToken = default)
+    {
+        return Find(global::LiteDbX.Query.Near(GetFieldExpression(field), center, radiusMeters), skip, limit, cancellationToken);
+    }
+
+    public IAsyncEnumerable<T> FindWithinBoundingBox(
+        Expression<Func<T, GeoPoint>> field,
+        double minLat,
+        double minLon,
+        double maxLat,
+        double maxLon,
+        int skip = 0,
+        int limit = int.MaxValue,
+        CancellationToken cancellationToken = default)
+    {
+        return Find(global::LiteDbX.Query.WithinBoundingBox(GetFieldExpression(field), minLat, minLon, maxLat, maxLon), skip, limit, cancellationToken);
+    }
+
+    public IAsyncEnumerable<T> FindWithin(
+        Expression<Func<T, GeoShape>> field,
+        GeoPolygon polygon,
+        int skip = 0,
+        int limit = int.MaxValue,
+        CancellationToken cancellationToken = default)
+    {
+        return Find(global::LiteDbX.Query.Within(GetFieldExpression(field), polygon), skip, limit, cancellationToken);
+    }
+
+    public IAsyncEnumerable<T> FindIntersects(
+        Expression<Func<T, GeoShape>> field,
+        GeoShape shape,
+        int skip = 0,
+        int limit = int.MaxValue,
+        CancellationToken cancellationToken = default)
+    {
+        return Find(global::LiteDbX.Query.Intersects(GetFieldExpression(field), shape), skip, limit, cancellationToken);
+    }
+
+    public IAsyncEnumerable<T> FindContainsPoint(
+        Expression<Func<T, GeoShape>> field,
+        GeoPoint point,
+        int skip = 0,
+        int limit = int.MaxValue,
+        CancellationToken cancellationToken = default)
+    {
+        return Find(global::LiteDbX.Query.ContainsPoint(GetFieldExpression(field), point), skip, limit, cancellationToken);
     }
 
     #endregion

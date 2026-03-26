@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using LiteDbX.Spatial;
 
 namespace LiteDbX;
 
@@ -205,11 +206,119 @@ public partial class Query
     }
 
     /// <summary>
+    /// Returns all documents whose point at <paramref name="field"/> lies within <paramref name="radiusMeters"/> of <paramref name="center"/>.
+    /// </summary>
+    public static BsonExpression Near(string field, GeoPoint center, double radiusMeters)
+    {
+        return Near(field, center, radiusMeters, LiteDbX.Spatial.Spatial.Options.Distance);
+    }
+
+    /// <summary>
+    /// Returns all documents whose point at <paramref name="field"/> lies within <paramref name="radiusMeters"/> of <paramref name="center"/> using the specified distance formula.
+    /// </summary>
+    public static BsonExpression Near(string field, GeoPoint center, double radiusMeters, DistanceFormula formula)
+    {
+        ValidateSpatialField(field);
+
+        if (center == null)
+        {
+            throw new ArgumentNullException(nameof(center));
+        }
+
+        if (radiusMeters < 0d)
+        {
+            throw new ArgumentOutOfRangeException(nameof(radiusMeters));
+        }
+
+        EnsureSpatialMapperRegistration();
+
+        return BsonExpression.Create($"SPATIAL_NEAR({field}, @0, @1, @2)", SerializeSpatial(center), radiusMeters, formula.ToString());
+    }
+
+    /// <summary>
+    /// Returns all documents whose spatial value at <paramref name="field"/> intersects the supplied bounding box.
+    /// </summary>
+    public static BsonExpression WithinBoundingBox(string field, double minLat, double minLon, double maxLat, double maxLon)
+    {
+        ValidateSpatialField(field);
+        return BsonExpression.Create($"SPATIAL_WITHIN_BOX({field}, @0, @1, @2, @3)", minLat, minLon, maxLat, maxLon);
+    }
+
+    /// <summary>
+    /// Returns all documents whose spatial value at <paramref name="field"/> lies within the supplied polygon.
+    /// </summary>
+    public static BsonExpression Within(string field, GeoPolygon polygon)
+    {
+        ValidateSpatialField(field);
+
+        if (polygon == null)
+        {
+            throw new ArgumentNullException(nameof(polygon));
+        }
+
+        EnsureSpatialMapperRegistration();
+
+        return BsonExpression.Create($"SPATIAL_WITHIN({field}, @0)", SerializeSpatial(polygon));
+    }
+
+    /// <summary>
+    /// Returns all documents whose spatial value at <paramref name="field"/> intersects <paramref name="shape"/>.
+    /// </summary>
+    public static BsonExpression Intersects(string field, GeoShape shape)
+    {
+        ValidateSpatialField(field);
+
+        if (shape == null)
+        {
+            throw new ArgumentNullException(nameof(shape));
+        }
+
+        EnsureSpatialMapperRegistration();
+
+        return BsonExpression.Create($"SPATIAL_INTERSECTS({field}, @0)", SerializeSpatial(shape));
+    }
+
+    /// <summary>
+    /// Returns all documents whose spatial value at <paramref name="field"/> contains <paramref name="point"/>.
+    /// </summary>
+    public static BsonExpression ContainsPoint(string field, GeoPoint point)
+    {
+        ValidateSpatialField(field);
+
+        if (point == null)
+        {
+            throw new ArgumentNullException(nameof(point));
+        }
+
+        EnsureSpatialMapperRegistration();
+
+        return BsonExpression.Create($"SPATIAL_CONTAINS_POINT({field}, @0)", SerializeSpatial(point));
+    }
+
+    /// <summary>
     /// Get all operands to works with array or enumerable values
     /// </summary>
     public static QueryAny Any()
     {
         return new QueryAny();
+    }
+
+    private static void ValidateSpatialField(string field)
+    {
+        if (field.IsNullOrWhiteSpace())
+        {
+            throw new ArgumentNullException(nameof(field));
+        }
+    }
+
+    private static void EnsureSpatialMapperRegistration()
+    {
+        LiteDbX.Spatial.Spatial.Register();
+    }
+
+    private static BsonValue SerializeSpatial(GeoShape shape)
+    {
+        return BsonMapper.Global.Serialize(shape.GetType(), shape);
     }
 
     /// <summary>

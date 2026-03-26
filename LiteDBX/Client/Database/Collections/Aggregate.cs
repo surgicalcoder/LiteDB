@@ -3,6 +3,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
+using LiteDbX.Spatial;
 
 namespace LiteDbX;
 
@@ -48,6 +49,21 @@ public partial class LiteCollection<T>
     /// </summary>
     public ValueTask<int> Count(Query query, CancellationToken cancellationToken = default)
         => new LiteQueryable<T>(_engine, _mapper, Name, query).Count(cancellationToken);
+
+    public ValueTask<int> CountNear(Expression<Func<T, GeoPoint>> field, GeoPoint center, double radiusMeters, CancellationToken cancellationToken = default)
+        => Count(global::LiteDbX.Query.Near(GetFieldExpression(field), center, radiusMeters), cancellationToken);
+
+    public ValueTask<int> CountWithinBoundingBox(Expression<Func<T, GeoPoint>> field, double minLat, double minLon, double maxLat, double maxLon, CancellationToken cancellationToken = default)
+        => Count(global::LiteDbX.Query.WithinBoundingBox(GetFieldExpression(field), minLat, minLon, maxLat, maxLon), cancellationToken);
+
+    public ValueTask<int> CountWithin(Expression<Func<T, GeoShape>> field, GeoPolygon polygon, CancellationToken cancellationToken = default)
+        => Count(global::LiteDbX.Query.Within(GetFieldExpression(field), polygon), cancellationToken);
+
+    public ValueTask<int> CountIntersects(Expression<Func<T, GeoShape>> field, GeoShape shape, CancellationToken cancellationToken = default)
+        => Count(global::LiteDbX.Query.Intersects(GetFieldExpression(field), shape), cancellationToken);
+
+    public ValueTask<int> CountContainsPoint(Expression<Func<T, GeoShape>> field, GeoPoint point, CancellationToken cancellationToken = default)
+        => Count(global::LiteDbX.Query.ContainsPoint(GetFieldExpression(field), point), cancellationToken);
 
     #endregion
 

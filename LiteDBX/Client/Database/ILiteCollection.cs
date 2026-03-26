@@ -4,6 +4,7 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using LiteDbX.Engine;
+using LiteDbX.Spatial;
 
 namespace LiteDbX;
 
@@ -161,6 +162,21 @@ public interface ILiteCollection<T>
     /// <summary>Stream all documents in this collection, ordered by <c>_id</c>.</summary>
     IAsyncEnumerable<T> FindAll(CancellationToken cancellationToken = default);
 
+    /// <summary>Stream documents whose point field lies within the specified radius of <paramref name="center"/>.</summary>
+    IAsyncEnumerable<T> FindNear(Expression<Func<T, GeoPoint>> field, GeoPoint center, double radiusMeters, int skip = 0, int limit = int.MaxValue, CancellationToken cancellationToken = default);
+
+    /// <summary>Stream documents whose point field intersects the supplied bounding box.</summary>
+    IAsyncEnumerable<T> FindWithinBoundingBox(Expression<Func<T, GeoPoint>> field, double minLat, double minLon, double maxLat, double maxLon, int skip = 0, int limit = int.MaxValue, CancellationToken cancellationToken = default);
+
+    /// <summary>Stream documents whose spatial field lies within the supplied polygon.</summary>
+    IAsyncEnumerable<T> FindWithin(Expression<Func<T, GeoShape>> field, GeoPolygon polygon, int skip = 0, int limit = int.MaxValue, CancellationToken cancellationToken = default);
+
+    /// <summary>Stream documents whose spatial field intersects the supplied shape.</summary>
+    IAsyncEnumerable<T> FindIntersects(Expression<Func<T, GeoShape>> field, GeoShape shape, int skip = 0, int limit = int.MaxValue, CancellationToken cancellationToken = default);
+
+    /// <summary>Stream documents whose spatial field contains the supplied point.</summary>
+    IAsyncEnumerable<T> FindContainsPoint(Expression<Func<T, GeoShape>> field, GeoPoint point, int skip = 0, int limit = int.MaxValue, CancellationToken cancellationToken = default);
+
     // ── Delete ────────────────────────────────────────────────────────────────
 
     /// <summary>Delete a document by its <c>_id</c>. Returns <c>true</c> if it was found and deleted.</summary>
@@ -181,6 +197,21 @@ public interface ILiteCollection<T>
     /// <summary>Delete all documents matching a LINQ predicate. Returns the number deleted.</summary>
     ValueTask<int> DeleteMany(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default);
 
+    /// <summary>Delete all documents whose point field lies within the specified radius of <paramref name="center"/>.</summary>
+    ValueTask<int> DeleteNear(Expression<Func<T, GeoPoint>> field, GeoPoint center, double radiusMeters, CancellationToken cancellationToken = default);
+
+    /// <summary>Delete all documents whose point field intersects the supplied bounding box.</summary>
+    ValueTask<int> DeleteWithinBoundingBox(Expression<Func<T, GeoPoint>> field, double minLat, double minLon, double maxLat, double maxLon, CancellationToken cancellationToken = default);
+
+    /// <summary>Delete all documents whose spatial field lies within the supplied polygon.</summary>
+    ValueTask<int> DeleteWithin(Expression<Func<T, GeoShape>> field, GeoPolygon polygon, CancellationToken cancellationToken = default);
+
+    /// <summary>Delete all documents whose spatial field intersects the supplied shape.</summary>
+    ValueTask<int> DeleteIntersects(Expression<Func<T, GeoShape>> field, GeoShape shape, CancellationToken cancellationToken = default);
+
+    /// <summary>Delete all documents whose spatial field contains the supplied point.</summary>
+    ValueTask<int> DeleteContainsPoint(Expression<Func<T, GeoShape>> field, GeoPoint point, CancellationToken cancellationToken = default);
+
     // ── Count / Exists ────────────────────────────────────────────────────────
 
     /// <summary>Count all documents in the collection.</summary>
@@ -200,6 +231,21 @@ public interface ILiteCollection<T>
 
     /// <summary>Count documents matching a structured <see cref="Query"/>.</summary>
     ValueTask<int> Count(Query query, CancellationToken cancellationToken = default);
+
+    /// <summary>Count documents whose point field lies within the specified radius of <paramref name="center"/>.</summary>
+    ValueTask<int> CountNear(Expression<Func<T, GeoPoint>> field, GeoPoint center, double radiusMeters, CancellationToken cancellationToken = default);
+
+    /// <summary>Count documents whose point field intersects the supplied bounding box.</summary>
+    ValueTask<int> CountWithinBoundingBox(Expression<Func<T, GeoPoint>> field, double minLat, double minLon, double maxLat, double maxLon, CancellationToken cancellationToken = default);
+
+    /// <summary>Count documents whose spatial field lies within the supplied polygon.</summary>
+    ValueTask<int> CountWithin(Expression<Func<T, GeoShape>> field, GeoPolygon polygon, CancellationToken cancellationToken = default);
+
+    /// <summary>Count documents whose spatial field intersects the supplied shape.</summary>
+    ValueTask<int> CountIntersects(Expression<Func<T, GeoShape>> field, GeoShape shape, CancellationToken cancellationToken = default);
+
+    /// <summary>Count documents whose spatial field contains the supplied point.</summary>
+    ValueTask<int> CountContainsPoint(Expression<Func<T, GeoShape>> field, GeoPoint point, CancellationToken cancellationToken = default);
 
     /// <summary>Count all documents in the collection as a <c>long</c>.</summary>
     ValueTask<long> LongCount(CancellationToken cancellationToken = default);

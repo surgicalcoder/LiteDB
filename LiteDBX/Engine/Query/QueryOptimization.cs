@@ -144,7 +144,7 @@ internal class QueryOptimization
             }
 
             // add expression in where list breaking AND statments
-            if (predicate.IsPredicate || predicate.Type == BsonExpressionType.Or)
+            if (predicate.IsPredicate || predicate.Type == BsonExpressionType.Or || IsSpatialPredicate(predicate))
             {
                 _terms.Add(predicate);
             }
@@ -166,6 +166,31 @@ internal class QueryOptimization
         foreach (var predicate in _query.Where)
         {
             add(predicate);
+        }
+    }
+
+    private static bool IsSpatialPredicate(BsonExpression expression)
+    {
+        if (expression == null || expression.Type != BsonExpressionType.Call)
+        {
+            return false;
+        }
+
+        var source = expression.Source?.Trim() ?? string.Empty;
+        var nameEnd = source.IndexOf('(');
+        var name = nameEnd >= 0 ? source.Substring(0, nameEnd) : source;
+
+        switch (name.ToUpperInvariant())
+        {
+            case "SPATIAL_INTERSECTS":
+            case "SPATIAL_INTERSECTS_MBB":
+            case "SPATIAL_CONTAINS_POINT":
+            case "SPATIAL_NEAR":
+            case "SPATIAL_WITHIN":
+            case "SPATIAL_WITHIN_BOX":
+                return true;
+            default:
+                return false;
         }
     }
 
