@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using static LiteDbX.Constants;
@@ -91,42 +92,86 @@ internal class BufferReader : IDisposable
         return false;
     }
 
-    /// <summary>
-    /// Read bytes from source and copy into buffer. Return how many bytes was read
-    /// </summary>
-    public int Read(byte[] buffer, int offset, int count)
+    private void EnsureCurrentSegment()
     {
-        var bufferPosition = 0;
-
-        while (bufferPosition < count)
+        if (_currentPosition >= _current.Count && !IsEOF)
         {
-            var bytesLeft = _current.Count - _currentPosition;
-            var bytesToCopy = Math.Min(count - bufferPosition, bytesLeft);
+            MoveForward(0);
+        }
+    }
 
-            // fill buffer
-            if (buffer != null)
-            {
-                Buffer.BlockCopy(_current.Array,
-                    _current.Offset + _currentPosition,
-                    buffer,
-                    offset + bufferPosition,
-                    bytesToCopy);
-            }
+    private void Advance(int count)
+    {
+        var remaining = count;
 
-            bufferPosition += bytesToCopy;
-
-            // move position in current segment (and go to next segment if finish)
-            MoveForward(bytesToCopy);
+        while (remaining > 0)
+        {
+            EnsureCurrentSegment();
 
             if (IsEOF)
             {
                 break;
             }
+
+            var bytesLeft = _current.Count - _currentPosition;
+            var bytesToSkip = Math.Min(remaining, bytesLeft);
+
+            MoveForward(bytesToSkip);
+
+            remaining -= bytesToSkip;
         }
 
-        ENSURE(count == bufferPosition, "current value must fit inside defined buffer");
+        ENSURE(remaining == 0, "current value must fit inside defined buffer");
+    }
 
-        return bufferPosition;
+    private void ReadTo(Span<byte> destination)
+    {
+        var remaining = destination.Length;
+        var destinationOffset = 0;
+
+        while (remaining > 0)
+        {
+            EnsureCurrentSegment();
+
+            if (IsEOF)
+            {
+                break;
+            }
+
+            var bytesLeft = _current.Count - _currentPosition;
+            var bytesToCopy = Math.Min(remaining, bytesLeft);
+
+            _current.AsSpan(_currentPosition, bytesToCopy)
+                .CopyTo(destination.Slice(destinationOffset, bytesToCopy));
+
+            MoveForward(bytesToCopy);
+
+            destinationOffset += bytesToCopy;
+            remaining -= bytesToCopy;
+        }
+
+        ENSURE(remaining == 0, "current value must fit inside defined buffer");
+    }
+
+    /// <summary>
+    /// Read bytes from source and copy into buffer. Return how many bytes was read
+    /// </summary>
+    public int Read(byte[] buffer, int offset, int count)
+    {
+        if (count == 0)
+        {
+            return 0;
+        }
+
+        if (buffer == null)
+        {
+            Advance(count);
+            return count;
+        }
+
+        ReadTo(buffer.AsSpan(offset, count));
+
+        return count;
     }
 
     /// <summary>
@@ -134,7 +179,13 @@ internal class BufferReader : IDisposable
     /// </summary>
     public int Skip(int count)
     {
-        return Read(null, 0, count);
+        if (count == 0)
+        {
+            return 0;
+        }
+
+        Advance(count);
+        return count;
     }
 
     /// <summary>
@@ -246,49 +297,86 @@ internal class BufferReader : IDisposable
 
     #region Read Numbers
 
-    private T ReadNumber<T>(Func<byte[], int, T> convert, int size)
-    {
-        T value;
-
-        // if fits in current segment, use inner array - otherwise copy from multiples segments
-        if (_currentPosition + size <= _current.Count)
-        {
-            value = convert(_current.Array, _current.Offset + _currentPosition);
-
-            MoveForward(size);
-        }
-        else
-        {
-            var buffer = _bufferPool.Rent(size);
-
-            Read(buffer, 0, size);
-
-            value = convert(buffer, 0);
-
-            _bufferPool.Return(buffer, true);
-        }
-
-        return value;
-    }
-
     public int ReadInt32()
     {
-        return ReadNumber(BitConverter.ToInt32, 4);
+        const int size = 4;
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            var value = BinaryPrimitives.ReadInt32LittleEndian(_current.AsSpan(_currentPosition, size));
+
+            MoveForward(size);
+
+            return value;
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        ReadTo(buffer);
+
+        return BinaryPrimitives.ReadInt32LittleEndian(buffer);
     }
 
     public long ReadInt64()
     {
-        return ReadNumber(BitConverter.ToInt64, 8);
+        const int size = 8;
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            var value = BinaryPrimitives.ReadInt64LittleEndian(_current.AsSpan(_currentPosition, size));
+
+            MoveForward(size);
+
+            return value;
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        ReadTo(buffer);
+
+        return BinaryPrimitives.ReadInt64LittleEndian(buffer);
     }
 
     public uint ReadUInt32()
     {
-        return ReadNumber(BitConverter.ToUInt32, 4);
+        const int size = 4;
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            var value = BinaryPrimitives.ReadUInt32LittleEndian(_current.AsSpan(_currentPosition, size));
+
+            MoveForward(size);
+
+            return value;
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        ReadTo(buffer);
+
+        return BinaryPrimitives.ReadUInt32LittleEndian(buffer);
     }
 
     public double ReadDouble()
     {
-        return ReadNumber(BitConverter.ToDouble, 8);
+        const int size = 8;
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            var bits = BinaryPrimitives.ReadInt64LittleEndian(_current.AsSpan(_currentPosition, size));
+
+            MoveForward(size);
+
+            return BitConverter.Int64BitsToDouble(bits);
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        ReadTo(buffer);
+
+        var value = BinaryPrimitives.ReadInt64LittleEndian(buffer);
+
+        return BitConverter.Int64BitsToDouble(value);
     }
 
     public decimal ReadDecimal()
@@ -459,7 +547,7 @@ internal class BufferReader : IDisposable
             var end = Position + length - 5;
             var remaining = fields == null || fields.Count == 0 ? null : new HashSet<string>(fields, StringComparer.OrdinalIgnoreCase);
 
-            while (Position < end && (remaining == null || remaining?.Count > 0))
+            while (Position < end && (remaining == null || remaining.Count > 0))
             {
                 var value = ReadElement(remaining, out var name);
 
@@ -497,7 +585,7 @@ internal class BufferReader : IDisposable
 
             while (Position < end)
             {
-                var value = ReadElement(null, out var name);
+                var value = ReadElement(null, out _);
                 arr.Add(value);
             }
 

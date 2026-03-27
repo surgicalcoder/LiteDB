@@ -26,6 +26,16 @@ internal class BufferSlice
         set => Array[Offset + index] = value;
     }
 
+    public ReadOnlySpan<byte> AsSpan(int offset, int length)
+    {
+        return new ReadOnlySpan<byte>(Array, Offset + offset, length);
+    }
+
+    public Span<byte> AsWritableSpan(int offset, int length)
+    {
+        return new Span<byte>(Array, Offset + offset, length);
+    }
+
     /// <summary>
     /// Clear all page content byte array (not controls)
     /// </summary>

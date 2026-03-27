@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using LiteDbX.Engine;
 
 [assembly: InternalsVisibleTo("LiteDBX.Tests")]
+[assembly: InternalsVisibleTo("LiteDbX.Benchmarks")]
 #if DEBUG
 [assembly: InternalsVisibleTo("ConsoleApp1")]
 #endif

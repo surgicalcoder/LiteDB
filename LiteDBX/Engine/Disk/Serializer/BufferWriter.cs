@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using static LiteDbX.Constants;
 
 namespace LiteDbX.Engine;
@@ -87,42 +89,86 @@ internal class BufferWriter : IDisposable
         return false;
     }
 
-    /// <summary>
-    /// Write bytes from buffer into segmentsr. Return how many bytes was write
-    /// </summary>
-    public int Write(byte[] buffer, int offset, int count)
+    private void EnsureCurrentSegment()
     {
-        var bufferPosition = 0;
-
-        while (bufferPosition < count)
+        if (_currentPosition >= _current.Count && !IsEOF)
         {
-            var bytesLeft = _current.Count - _currentPosition;
-            var bytesToCopy = Math.Min(count - bufferPosition, bytesLeft);
+            MoveForward(0);
+        }
+    }
 
-            // fill buffer
-            if (buffer != null)
-            {
-                Buffer.BlockCopy(buffer,
-                    offset + bufferPosition,
-                    _current.Array,
-                    _current.Offset + _currentPosition,
-                    bytesToCopy);
-            }
+    private void Advance(int count)
+    {
+        var remaining = count;
 
-            bufferPosition += bytesToCopy;
-
-            // move position in current segment (and go to next segment if finish)
-            MoveForward(bytesToCopy);
+        while (remaining > 0)
+        {
+            EnsureCurrentSegment();
 
             if (IsEOF)
             {
                 break;
             }
+
+            var bytesLeft = _current.Count - _currentPosition;
+            var bytesToSkip = Math.Min(remaining, bytesLeft);
+
+            MoveForward(bytesToSkip);
+
+            remaining -= bytesToSkip;
         }
 
-        ENSURE(count == bufferPosition, "current value must fit inside defined buffer");
+        ENSURE(remaining == 0, "current value must fit inside defined buffer");
+    }
 
-        return bufferPosition;
+    private void Write(ReadOnlySpan<byte> source)
+    {
+        var remaining = source.Length;
+        var sourceOffset = 0;
+
+        while (remaining > 0)
+        {
+            EnsureCurrentSegment();
+
+            if (IsEOF)
+            {
+                break;
+            }
+
+            var bytesLeft = _current.Count - _currentPosition;
+            var bytesToCopy = Math.Min(remaining, bytesLeft);
+
+            source.Slice(sourceOffset, bytesToCopy)
+                .CopyTo(_current.AsWritableSpan(_currentPosition, bytesToCopy));
+
+            MoveForward(bytesToCopy);
+
+            sourceOffset += bytesToCopy;
+            remaining -= bytesToCopy;
+        }
+
+        ENSURE(remaining == 0, "current value must fit inside defined buffer");
+    }
+
+    /// <summary>
+    /// Write bytes from buffer into segmentsr. Return how many bytes was write
+    /// </summary>
+    public int Write(byte[] buffer, int offset, int count)
+    {
+        if (count == 0)
+        {
+            return 0;
+        }
+
+        if (buffer == null)
+        {
+            Advance(count);
+            return count;
+        }
+
+        Write(buffer.AsSpan(offset, count));
+
+        return count;
     }
 
     /// <summary>
@@ -138,7 +184,13 @@ internal class BufferWriter : IDisposable
     /// </summary>
     public int Skip(int count)
     {
-        return Write(null, 0, count);
+        if (count == 0)
+        {
+            return 0;
+        }
+
+        Advance(count);
+        return count;
     }
 
     /// <summary>
@@ -236,44 +288,85 @@ internal class BufferWriter : IDisposable
 
     #region Numbers
 
-    private void WriteNumber<T>(T value, Action<T, byte[], int> toBytes, int size)
-    {
-        if (_currentPosition + size <= _current.Count)
-        {
-            toBytes(value, _current.Array, _current.Offset + _currentPosition);
-
-            MoveForward(size);
-        }
-        else
-        {
-            var buffer = _bufferPool.Rent(size);
-
-            toBytes(value, buffer, 0);
-
-            Write(buffer, 0, size);
-
-            _bufferPool.Return(buffer, true);
-        }
-    }
-
     public void Write(int value)
     {
-        WriteNumber(value, BufferExtensions.ToBytes, 4);
+        const int size = 4;
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(_current.AsWritableSpan(_currentPosition, size), value);
+
+            MoveForward(size);
+
+            return;
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        BinaryPrimitives.WriteInt32LittleEndian(buffer, value);
+
+        Write(buffer);
     }
 
     public void Write(long value)
     {
-        WriteNumber(value, BufferExtensions.ToBytes, 8);
+        const int size = 8;
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            BinaryPrimitives.WriteInt64LittleEndian(_current.AsWritableSpan(_currentPosition, size), value);
+
+            MoveForward(size);
+
+            return;
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        BinaryPrimitives.WriteInt64LittleEndian(buffer, value);
+
+        Write(buffer);
     }
 
     public void Write(uint value)
     {
-        WriteNumber(value, BufferExtensions.ToBytes, 4);
+        const int size = 4;
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(_current.AsWritableSpan(_currentPosition, size), value);
+
+            MoveForward(size);
+
+            return;
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
+
+        Write(buffer);
     }
 
     public void Write(double value)
     {
-        WriteNumber(value, BufferExtensions.ToBytes, 8);
+        const int size = 8;
+        var bits = BitConverter.DoubleToInt64Bits(value);
+
+        if (_currentPosition + size <= _current.Count)
+        {
+            BinaryPrimitives.WriteInt64LittleEndian(_current.AsWritableSpan(_currentPosition, size), bits);
+
+            MoveForward(size);
+
+            return;
+        }
+
+        Span<byte> buffer = stackalloc byte[size];
+
+        BinaryPrimitives.WriteInt64LittleEndian(buffer, bits);
+
+        Write(buffer);
     }
 
     public void Write(decimal value)
@@ -304,10 +397,31 @@ internal class BufferWriter : IDisposable
     /// </summary>
     public void Write(Guid value)
     {
-        // there is no avaiable value.TryWriteBytes (TODO: implement conditional compile)?
-        var bytes = value.ToByteArray();
+        const int size = 16;
 
-        Write(bytes, 0, 16);
+        if (_currentPosition + size <= _current.Count)
+        {
+            WriteGuidBytes(_current.AsWritableSpan(_currentPosition, size), value);
+
+            MoveForward(size);
+        }
+        else
+        {
+            Span<byte> buffer = stackalloc byte[size];
+
+            WriteGuidBytes(buffer, value);
+
+            Write(buffer);
+        }
+    }
+
+    private static void WriteGuidBytes(Span<byte> destination, Guid value)
+    {
+#if NETSTANDARD2_0 || NETSTANDARD2_1
+        MemoryMarshal.Write(destination, ref value);
+#else
+        MemoryMarshal.Write(destination, in value);
+#endif
     }
 
     /// <summary>

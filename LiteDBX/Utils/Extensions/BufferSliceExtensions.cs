@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Text;
 using LiteDbX.Engine;
 using static LiteDbX.Constants;
@@ -21,32 +22,33 @@ internal static class BufferSliceExtensions
 
     public static short ReadInt16(this BufferSlice buffer, int offset)
     {
-        return BitConverter.ToInt16(buffer.Array, buffer.Offset + offset);
+        return BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(offset, sizeof(short)));
     }
 
     public static ushort ReadUInt16(this BufferSlice buffer, int offset)
     {
-        return BitConverter.ToUInt16(buffer.Array, buffer.Offset + offset);
+        return BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset, sizeof(ushort)));
     }
 
     public static int ReadInt32(this BufferSlice buffer, int offset)
     {
-        return BitConverter.ToInt32(buffer.Array, buffer.Offset + offset);
+        return BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset, sizeof(int)));
     }
 
     public static uint ReadUInt32(this BufferSlice buffer, int offset)
     {
-        return BitConverter.ToUInt32(buffer.Array, buffer.Offset + offset);
+        return BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(offset, sizeof(uint)));
     }
 
     public static long ReadInt64(this BufferSlice buffer, int offset)
     {
-        return BitConverter.ToInt64(buffer.Array, buffer.Offset + offset);
+        return BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset, sizeof(long)));
     }
 
     public static double ReadDouble(this BufferSlice buffer, int offset)
     {
-        return BitConverter.ToDouble(buffer.Array, buffer.Offset + offset);
+        var bits = BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset, sizeof(long)));
+        return BitConverter.Int64BitsToDouble(bits);
     }
 
     public static decimal ReadDecimal(this BufferSlice buffer, int offset)
@@ -195,32 +197,33 @@ internal static class BufferSliceExtensions
 
     public static void Write(this BufferSlice buffer, short value, int offset)
     {
-        value.ToBytes(buffer.Array, buffer.Offset + offset);
+        BinaryPrimitives.WriteInt16LittleEndian(buffer.AsWritableSpan(offset, sizeof(short)), value);
     }
 
     public static void Write(this BufferSlice buffer, ushort value, int offset)
     {
-        value.ToBytes(buffer.Array, buffer.Offset + offset);
+        BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsWritableSpan(offset, sizeof(ushort)), value);
     }
 
     public static void Write(this BufferSlice buffer, int value, int offset)
     {
-        value.ToBytes(buffer.Array, buffer.Offset + offset);
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.AsWritableSpan(offset, sizeof(int)), value);
     }
 
     public static void Write(this BufferSlice buffer, uint value, int offset)
     {
-        value.ToBytes(buffer.Array, buffer.Offset + offset);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsWritableSpan(offset, sizeof(uint)), value);
     }
 
     public static void Write(this BufferSlice buffer, long value, int offset)
     {
-        value.ToBytes(buffer.Array, buffer.Offset + offset);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer.AsWritableSpan(offset, sizeof(long)), value);
     }
 
     public static void Write(this BufferSlice buffer, double value, int offset)
     {
-        value.ToBytes(buffer.Array, buffer.Offset + offset);
+        var bits = BitConverter.DoubleToInt64Bits(value);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer.AsWritableSpan(offset, sizeof(long)), bits);
     }
 
     public static void Write(this BufferSlice buffer, decimal value, int offset)
@@ -234,12 +237,13 @@ internal static class BufferSliceExtensions
 
     public static void Write(this BufferSlice buffer, DateTime value, int offset)
     {
-        value.ToUniversalTime().Ticks.ToBytes(buffer.Array, buffer.Offset + offset);
+        var ticks = value.ToUniversalTime().Ticks;
+        BinaryPrimitives.WriteInt64LittleEndian(buffer.AsWritableSpan(offset, sizeof(long)), ticks);
     }
 
     public static void Write(this BufferSlice buffer, PageAddress value, int offset)
     {
-        value.PageID.ToBytes(buffer.Array, buffer.Offset + offset);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsWritableSpan(offset, sizeof(uint)), value.PageID);
         buffer[offset + 4] = value.Index;
     }
 
@@ -255,7 +259,7 @@ internal static class BufferSliceExtensions
 
     public static void Write(this BufferSlice buffer, byte[] value, int offset)
     {
-        Buffer.BlockCopy(value, 0, buffer.Array, buffer.Offset + offset, value.Length);
+        value.AsSpan().CopyTo(buffer.AsWritableSpan(offset, value.Length));
     }
 
     public static void Write(this BufferSlice buffer, string value, int offset)
