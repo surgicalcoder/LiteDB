@@ -213,6 +213,8 @@ internal static class LiteDbXQueryParser
             throw UnsupportedMethod(call.Method, call);
         }
 
+        ValidateShape(source, methodKind.Value, call);
+
         return methodKind.Value switch
         {
             LiteDbXQueryMethodKind.Where => source.AppendOperator(
@@ -306,8 +308,85 @@ internal static class LiteDbXQueryParser
     private static NotSupportedException UnsupportedMethod(MethodInfo method, Expression expression)
     {
         return new NotSupportedException(
-            $"Queryable method {Reflection.MethodName(method)} is not supported by the current LiteDbX LINQ provider scope ({expression}). " +
-            "Phase 2 only defines the provider shell and normalized state model. Fall back to collection.Query() for unsupported shapes.");
+            $"Queryable method {Reflection.MethodName(method)} is not supported by the current LiteDbX LINQ MVP scope ({expression}). " +
+            "Supported operators in this phase are Where, Select, OrderBy, OrderByDescending, ThenBy, ThenByDescending, Skip, and Take. " +
+            "Fall back to collection.Query() for unsupported shapes.");
+    }
+
+    private static void ValidateShape(LiteDbXQueryState source, LiteDbXQueryMethodKind methodKind, MethodCallExpression call)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (call == null) throw new ArgumentNullException(nameof(call));
+
+        if (source.HasProjection && methodKind != LiteDbXQueryMethodKind.Skip && methodKind != LiteDbXQueryMethodKind.Take)
+        {
+            throw UnsupportedPattern(
+                "query-shaping after Select(...) is not supported in the current LiteDbX LINQ MVP",
+                call,
+                "Apply filtering and ordering before Select(...), or fall back to collection.Query() for more advanced query shapes.");
+        }
+
+        if (source.HasPaging && methodKind != LiteDbXQueryMethodKind.Skip && methodKind != LiteDbXQueryMethodKind.Take)
+        {
+            throw UnsupportedPattern(
+                $"{methodKind} after paging is not supported in the current LiteDbX LINQ MVP",
+                call,
+                "Skip(...) / Take(...) must be the last query-shaping operators in the MVP provider pipeline.");
+        }
+
+        switch (methodKind)
+        {
+            case LiteDbXQueryMethodKind.Select when source.HasProjection:
+                throw UnsupportedPattern(
+                    "multiple Select(...) projections are not supported in the current LiteDbX LINQ MVP",
+                    call,
+                    "Use a single Select(...) projection, or fall back to collection.Query() for more advanced projection pipelines.");
+
+            case LiteDbXQueryMethodKind.OrderBy:
+            case LiteDbXQueryMethodKind.OrderByDescending:
+                if (source.HasPrimaryOrdering)
+                {
+                    throw UnsupportedPattern(
+                        "multiple primary ordering clauses are not supported by the LiteDbX LINQ MVP translator",
+                        call,
+                        "Use ThenBy(...) / ThenByDescending(...) to add secondary sort keys, or fall back to collection.Query().");
+                }
+                break;
+
+            case LiteDbXQueryMethodKind.Skip:
+                if (source.HasOffset)
+                {
+                    throw UnsupportedPattern(
+                        "multiple Skip(...) operators are not supported in the current LiteDbX LINQ MVP",
+                        call,
+                        "Use a single Skip(...), or fall back to collection.Query() for non-MVP paging shapes.");
+                }
+
+                if (source.HasLimit && !source.HasOffset)
+                {
+                    throw UnsupportedPattern(
+                        "Skip(...) after Take(...) is not supported in the current LiteDbX LINQ MVP",
+                        call,
+                        "Use Skip(...).Take(...) ordering in the MVP provider pipeline.");
+                }
+                break;
+
+            case LiteDbXQueryMethodKind.Take:
+                if (source.HasLimit)
+                {
+                    throw UnsupportedPattern(
+                        "multiple Take(...) operators are not supported in the current LiteDbX LINQ MVP",
+                        call,
+                        "Use a single Take(...), or fall back to collection.Query() for non-MVP paging shapes.");
+                }
+                break;
+        }
+    }
+
+    private static NotSupportedException UnsupportedPattern(string pattern, Expression expression, string guidance)
+    {
+        return new NotSupportedException(
+            $"{pattern} ({expression}). {guidance} Fall back to collection.Query() when you need native LiteDbX query-builder behavior outside the LINQ MVP scope.");
     }
 }
 
@@ -475,6 +554,44 @@ internal static class LiteDbXQueryExpressionHelper
             .FirstOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IQueryable<>));
 
         return queryableInterface?.GetGenericArguments()[0];
+    }
+}
+
+internal static class LiteDbXQueryableDebugExtensions
+{
+    public static LiteDbXQueryState ToQueryState(this IQueryable source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+
+        return GetProvider(source).Translate(source.Expression);
+    }
+
+    public static Query ToQuery(this IQueryable source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+
+        return GetProvider(source).LowerToQuery(source.Expression);
+    }
+
+    public static LiteQueryable<T> ToNativeQueryable<T>(this IQueryable<T> source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+
+        var provider = GetProvider(source);
+        var state = provider.Translate(source.Expression);
+        var query = provider.LowerToQuery(state);
+
+        return new LiteQueryable<T>(state.Root.Engine, state.Root.Mapper, state.Root.CollectionName, query, state.Root.Transaction);
+    }
+
+    private static LiteDbXQueryProvider GetProvider(IQueryable source)
+    {
+        if (source.Provider is LiteDbXQueryProvider provider)
+        {
+            return provider;
+        }
+
+        throw new ArgumentException("The supplied IQueryable is not backed by the LiteDbX LINQ provider.", nameof(source));
     }
 }
 

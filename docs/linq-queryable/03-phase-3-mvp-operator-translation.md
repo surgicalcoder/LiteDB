@@ -120,6 +120,32 @@ Provider errors should identify:
 - clear error path for unsupported shapes
 - initial translation tests and/or parity tests
 
+## Phase 3 Implementation Notes
+
+The Phase 3 MVP should preserve native `Query()` / `LiteQueryable<T>` semantics even when that means rejecting some legal LINQ-to-Objects method orderings.
+
+In particular, the MVP provider should:
+
+- allow `Where`
+- allow one primary ordering (`OrderBy` or `OrderByDescending`)
+- allow secondary ordering via `ThenBy` / `ThenByDescending`
+- allow one `Select`
+- allow one `Skip`
+- allow one `Take`
+- allow paging as the final query-shaping segment
+
+The MVP provider should fail clearly for patterns such as:
+
+- a second primary `OrderBy` / `OrderByDescending`
+- a second `Select`
+- multiple `Skip` calls
+- multiple `Take` calls
+- `Skip` after `Take`
+- query-shaping operators after `Select(...)` other than final paging
+- query-shaping operators after paging
+
+These restrictions are acceptable in Phase 3 because the goal is parity with the native builder surface, not broad LINQ semantic normalization.
+
 ## Validation
 
 - compare translated behavior to `collection.Query()` output

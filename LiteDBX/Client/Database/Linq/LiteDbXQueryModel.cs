@@ -139,6 +139,20 @@ internal sealed class LiteDbXQueryState
 
     public IReadOnlyList<LiteDbXQueryOperator> Operators => _operators;
 
+    public bool HasPrimaryOrdering => _operators.Any(x =>
+        x.Kind == LiteDbXQueryMethodKind.OrderBy ||
+        x.Kind == LiteDbXQueryMethodKind.OrderByDescending);
+
+    public bool HasAnyOrdering => HasPrimaryOrdering || _operators.Any(x =>
+        x.Kind == LiteDbXQueryMethodKind.ThenBy ||
+        x.Kind == LiteDbXQueryMethodKind.ThenByDescending);
+
+    public bool HasOffset => _operators.Any(x => x.Kind == LiteDbXQueryMethodKind.Skip);
+
+    public bool HasLimit => _operators.Any(x => x.Kind == LiteDbXQueryMethodKind.Take);
+
+    public bool HasPaging => HasOffset || HasLimit;
+
     public bool HasProjection { get; }
 
     public bool IsScalarProjection { get; }
