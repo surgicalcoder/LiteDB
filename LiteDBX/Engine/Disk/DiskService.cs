@@ -224,6 +224,9 @@ internal class DiskService : IDisposable, IAsyncDisposable
                 page.Release();
                 count++;
             }
+
+            if (count > 0)
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -267,6 +270,9 @@ internal class DiskService : IDisposable, IAsyncDisposable
                 page.Release();
                 count++;
             }
+
+            if (count > 0)
+                stream.Flush();
         }
         finally
         {
