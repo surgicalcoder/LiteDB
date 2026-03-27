@@ -1,4 +1,5 @@
 ﻿using System.Linq.Expressions;
+using System.Reflection;
 using System.Text.RegularExpressions;
 
 namespace LiteDbX;
@@ -52,5 +53,20 @@ internal static class ExpressionExtensions
                             .Replace(")", "");
 
         return path;
+    }
+
+    public static MemberInfo GetMemberInfo(this Expression expr)
+    {
+        while (expr is LambdaExpression lambda)
+        {
+            expr = lambda.Body;
+        }
+
+        while (expr.NodeType == ExpressionType.Convert || expr.NodeType == ExpressionType.ConvertChecked)
+        {
+            expr = ((UnaryExpression)expr).Operand;
+        }
+
+        return (expr as MemberExpression)?.Member;
     }
 }

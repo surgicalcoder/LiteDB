@@ -286,15 +286,7 @@ public partial class BsonMapper
         {
             if (value.TryGetValue(member.FieldName, out var val))
             {
-                // check if has a custom deserialize function
-                if (member.Deserialize != null)
-                {
-                    member.Setter(obj, member.Deserialize(val, this));
-                }
-                else
-                {
-                    member.Setter(obj, Deserialize(member.DataType, val));
-                }
+                member.Setter(obj, DeserializeMemberValue(member, val));
             }
         }
     }

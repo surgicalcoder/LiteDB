@@ -44,6 +44,7 @@ internal class LinqExpressionVisitor : ExpressionVisitor
 
     private readonly BsonDocument _parameters = new();
     private readonly ParameterExpression _rootParameter;
+    private MemberMapper _constantSerializationMember;
     private Type _dbRefType;
     private int _paramIndex;
 
@@ -281,6 +282,7 @@ internal class LinqExpressionVisitor : ExpressionVisitor
 
         // if type is string, use direct BsonValue(string) to avoid rules like TrimWhitespace/EmptyStringToNull in mapper
         var arg = type == null ? BsonValue.Null :
+            _constantSerializationMember != null ? _mapper.SerializeMemberValue(_constantSerializationMember, value, 0) :
             type == typeof(string) ? new BsonValue((string)value) :
             _mapper.Serialize(value.GetType(), value);
 
@@ -451,6 +453,8 @@ internal class LinqExpressionVisitor : ExpressionVisitor
     protected override Expression VisitBinary(BinaryExpression node)
     {
         var andOr = node.NodeType == ExpressionType.AndAlso || node.NodeType == ExpressionType.OrElse;
+        var leftSerializationMember = ResolveSerializationMember(node.Right);
+        var rightSerializationMember = ResolveSerializationMember(node.Left);
 
         // special visitors
         if (node.NodeType == ExpressionType.Coalesce)
@@ -467,7 +471,7 @@ internal class LinqExpressionVisitor : ExpressionVisitor
 
         _builder.Append("(");
 
-        VisitAsPredicate(node.Left, andOr);
+        VisitAsPredicate(node.Left, andOr, leftSerializationMember);
 
         _builder.Append(op);
 
@@ -477,11 +481,11 @@ internal class LinqExpressionVisitor : ExpressionVisitor
             unex.Operand.Type.GetTypeInfo().IsEnum &&
             unex.Type == typeof(int))
         {
-            VisitAsPredicate(Expression.Constant(Enum.GetName(unex.Operand.Type, Evaluate(node.Right))), andOr);
+            VisitAsPredicate(Expression.Constant(Enum.GetName(unex.Operand.Type, Evaluate(node.Right))), andOr, rightSerializationMember);
         }
         else
         {
-            VisitAsPredicate(node.Right, andOr);
+            VisitAsPredicate(node.Right, andOr, rightSerializationMember);
         }
 
         _builder.Append(")");
@@ -539,6 +543,11 @@ internal class LinqExpressionVisitor : ExpressionVisitor
     /// </summary>
     private void ResolvePattern(string pattern, Expression obj, IList<Expression> args)
     {
+        ResolvePattern(pattern, obj, args, ResolveSerializationMember(obj));
+    }
+
+    private void ResolvePattern(string pattern, Expression obj, IList<Expression> args, MemberMapper argSerializationMember)
+    {
         var tokenizer = new Tokenizer(pattern);
 
         // lets use tokenizer to parse this method pattern
@@ -554,7 +563,7 @@ internal class LinqExpressionVisitor : ExpressionVisitor
             {
                 var i = Convert.ToInt32(tokenizer.ReadToken(false).Expect(TokenType.Int).Value);
 
-                Visit(args[i]);
+                VisitWithSerializationMember(args[i], argSerializationMember);
             }
             else if (token.Type == TokenType.Percent)
             {
@@ -714,24 +723,76 @@ internal class LinqExpressionVisitor : ExpressionVisitor
     /// <summary>
     /// Visit expression but, if ensurePredicate = true, force expression be a predicate (appending ` = true`)
     /// </summary>
-    private void VisitAsPredicate(Expression expr, bool ensurePredicate)
+    private void VisitAsPredicate(Expression expr, bool ensurePredicate, MemberMapper serializationMember = null)
     {
         // apppend `= true` only if expression is path (MemberAccess), method call or constant
         ensurePredicate = ensurePredicate &&
                           (expr.NodeType == ExpressionType.MemberAccess || expr.NodeType == ExpressionType.Call || expr.NodeType == ExpressionType.Invoke || expr.NodeType == ExpressionType.Constant);
 
+        var previousSerializationMember = _constantSerializationMember;
+        _constantSerializationMember = serializationMember;
+
         if (ensurePredicate)
         {
             _builder.Append("(");
             _builder.Append("(");
-            base.Visit(expr);
+            try
+            {
+                base.Visit(expr);
+            }
+            finally
+            {
+                _constantSerializationMember = previousSerializationMember;
+            }
             _builder.Append(")");
             _builder.Append(" = true)");
         }
         else
         {
-            base.Visit(expr);
+            try
+            {
+                base.Visit(expr);
+            }
+            finally
+            {
+                _constantSerializationMember = previousSerializationMember;
+            }
         }
+    }
+
+    private void VisitWithSerializationMember(Expression expr, MemberMapper serializationMember)
+    {
+        var previousSerializationMember = _constantSerializationMember;
+        _constantSerializationMember = serializationMember;
+
+        try
+        {
+            Visit(expr);
+        }
+        finally
+        {
+            _constantSerializationMember = previousSerializationMember;
+        }
+    }
+
+    private MemberMapper ResolveSerializationMember(Expression expr)
+    {
+        while (expr is UnaryExpression unary && (expr.NodeType == ExpressionType.Convert || expr.NodeType == ExpressionType.ConvertChecked))
+        {
+            expr = unary.Operand;
+        }
+
+        if (!ParameterExpressionVisitor.Test(expr))
+        {
+            return null;
+        }
+
+        var entity = _mapper.GetEntityMapper(_rootParameter.Type);
+        entity.WaitForInitialization();
+
+        var member = entity.GetMember(expr);
+
+        return _mapper.RequiresMemberAwareSerialization(member) ? member : null;
     }
 
     /// <summary>

@@ -82,6 +82,12 @@ public partial class BsonMapper
 
         var members = GetTypeMembers(mapper.ForType).ToArray();
         var id = GetIdMember(members);
+        var inheritedId = ResolveInheritedIdConvention(mapper.ForType, members);
+
+        if (inheritedId != null)
+        {
+            id = members.FirstOrDefault(inheritedId.Matches) ?? id;
+        }
 
         foreach (var memberInfo in members)
         {
@@ -139,6 +145,31 @@ public partial class BsonMapper
                 Getter = getter,
                 Setter = setter
             };
+
+            var inheritedRule = ResolveInheritedMemberRule(mapper.ForType, memberInfo);
+
+            if (inheritedRule != null)
+            {
+                if (inheritedRule.Ignore)
+                {
+                    member.IsIgnore = true;
+                    member.FieldName = null;
+                }
+                else if (inheritedRule.HasSerializer)
+                {
+                    member.Serialize = inheritedRule.Serialize;
+                    member.Deserialize = inheritedRule.Deserialize;
+                }
+            }
+
+            if (inheritedId?.Matches(memberInfo) == true)
+            {
+                member.FieldName = "_id";
+                member.AutoId = inheritedId.AutoId;
+                member.StorageType = inheritedId.StorageType;
+                member.Serialize = (obj, m) => m.SerializeToStorageType(member.DataType, obj, inheritedId.StorageType);
+                member.Deserialize = (value, m) => m.DeserializeFromStorageType(member.DataType, value, inheritedId.StorageType);
+            }
 
             // check if property has [BsonRef]
             var dbRef = (BsonRefAttribute)CustomAttributeExtensions.GetCustomAttributes(memberInfo, dbrefAttr, false)
@@ -227,7 +258,7 @@ public partial class BsonMapper
                 continue;
             }
 
-            var paramMap = new KeyValuePair<string, Type>[pars.Length];
+            var paramMap = new MemberMapper[pars.Length];
             int i;
 
             for (i = 0; i < pars.Length; i++)
@@ -250,7 +281,7 @@ public partial class BsonMapper
                     break;
                 }
 
-                paramMap[i] = new KeyValuePair<string, Type>(mi.FieldName, mi.DataType);
+                paramMap[i] = mi;
             }
 
             if (i < pars.Length)
@@ -260,7 +291,7 @@ public partial class BsonMapper
 
             CreateObject toAdd = value =>
                 Activator.CreateInstance(type, paramMap.Select(x =>
-                    Deserialize(x.Value, value[x.Key])).ToArray());
+                    DeserializeMemberValue(x, value[x.FieldName])).ToArray());
 
             if (ctor.GetCustomAttribute<BsonCtorAttribute>() != null)
             {

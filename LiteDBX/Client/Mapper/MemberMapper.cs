@@ -28,6 +28,11 @@ public class MemberMapper
     public string FieldName { get; set; }
 
     /// <summary>
+    /// Optional BSON storage type override used when a member is stored differently than its CLR type.
+    /// </summary>
+    public BsonType? StorageType { get; set; }
+
+    /// <summary>
     /// Delegate method to get value from entity instance
     /// </summary>
     public GenericGetter Getter { get; set; }

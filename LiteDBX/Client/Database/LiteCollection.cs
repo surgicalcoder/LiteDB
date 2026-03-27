@@ -36,9 +36,9 @@ public sealed partial class LiteCollection<T> : ILiteCollection<T>
             if (_id != null && _id.AutoId)
             {
                 AutoId =
-                    _id.DataType == typeof(int) || _id.DataType == typeof(int?) ? BsonAutoId.Int32 :
-                    _id.DataType == typeof(long) || _id.DataType == typeof(long?) ? BsonAutoId.Int64 :
-                    _id.DataType == typeof(Guid) || _id.DataType == typeof(Guid?) ? BsonAutoId.Guid :
+                    _id.StorageType == BsonType.Int32 || _id.DataType == typeof(int) || _id.DataType == typeof(int?) ? BsonAutoId.Int32 :
+                    _id.StorageType == BsonType.Int64 || _id.DataType == typeof(long) || _id.DataType == typeof(long?) ? BsonAutoId.Int64 :
+                    _id.StorageType == BsonType.Guid || _id.DataType == typeof(Guid) || _id.DataType == typeof(Guid?) ? BsonAutoId.Guid :
                     BsonAutoId.ObjectId;
             }
             else

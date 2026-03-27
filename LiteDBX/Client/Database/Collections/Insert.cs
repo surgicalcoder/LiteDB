@@ -34,7 +34,7 @@ public partial class LiteCollection<T>
         // checks if must update _id value in entity
         if (removed && _id != null)
         {
-            _id.Setter(entity, id.RawValue);
+            _id.Setter(entity, _mapper.DeserializeMemberValue(_id, id));
         }
 
         return id;
@@ -135,7 +135,7 @@ public partial class LiteCollection<T>
 
             if (removed && _id != null)
             {
-                _id.Setter(document, doc["_id"].RawValue);
+                _id.Setter(document, _mapper.DeserializeMemberValue(_id, doc["_id"]));
             }
         }
     }
@@ -148,10 +148,7 @@ public partial class LiteCollection<T>
         if (_id != null && doc.TryGetValue("_id", out var id))
         {
             // check if exists _autoId and current id is "empty"
-            if ((AutoId == BsonAutoId.Int32 && id.IsInt32 && id.AsInt32 == 0) ||
-                (AutoId == BsonAutoId.ObjectId && (id.IsNull || (id.IsObjectId && id.AsObjectId == ObjectId.Empty))) ||
-                (AutoId == BsonAutoId.Guid && id.IsGuid && id.AsGuid == Guid.Empty) ||
-                (AutoId == BsonAutoId.Int64 && id.IsInt64 && id.AsInt64 == 0))
+            if (IsEmptyDocumentId(id))
             {
                 // in this cases, remove _id and set new value after
                 doc.Remove("_id");
@@ -161,5 +158,18 @@ public partial class LiteCollection<T>
         }
 
         return false;
+    }
+
+    private bool IsEmptyDocumentId(BsonValue id)
+    {
+        if (id == null || id.IsNull)
+        {
+            return AutoId == BsonAutoId.ObjectId;
+        }
+
+        return (AutoId == BsonAutoId.Int32 && id.IsInt32 && id.AsInt32 == 0) ||
+               (AutoId == BsonAutoId.ObjectId && id.IsObjectId && id.AsObjectId == ObjectId.Empty) ||
+               (AutoId == BsonAutoId.Guid && id.IsGuid && id.AsGuid == Guid.Empty) ||
+               (AutoId == BsonAutoId.Int64 && id.IsInt64 && id.AsInt64 == 0);
     }
 }

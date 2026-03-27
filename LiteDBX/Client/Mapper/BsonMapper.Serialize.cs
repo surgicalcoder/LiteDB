@@ -252,15 +252,7 @@ public partial class BsonMapper
                 continue;
             }
 
-            // if member has a custom serialization, use it
-            if (member.Serialize != null)
-            {
-                doc[member.FieldName] = member.Serialize(value, this);
-            }
-            else
-            {
-                doc[member.FieldName] = Serialize(member.DataType, value, depth);
-            }
+            doc[member.FieldName] = SerializeMemberValue(member, value, depth);
         }
 
         return doc;

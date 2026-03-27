@@ -436,7 +436,7 @@ public partial class BsonMapper
 
             var bsonDocument = new BsonDocument
             {
-                ["$id"] = m.Serialize(id.GetType(), id, 0),
+                ["$id"] = m.SerializeMemberValue(idField, id, 0),
                 ["$ref"] = collection
             };
 
@@ -516,7 +516,7 @@ public partial class BsonMapper
 
                 var bsonDocument = new BsonDocument
                 {
-                    ["$id"] = m.Serialize(id.GetType(), id, 0),
+                    ["$id"] = m.SerializeMemberValue(idField, id, 0),
                     ["$ref"] = collection
                 };
 
