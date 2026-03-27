@@ -20,6 +20,17 @@ Do **not** replace the existing query builder or execution pipeline.
 8. Validate all edited files and run focused tests.
 9. Do not run any builds or tests yourself, that will be done manually.
 
+## Phase 1 Contract Decisions (Do Not Reopen Unless Explicitly Asked)
+
+1. LINQ starts from `ILiteCollection<T>.AsQueryable()`.
+2. A transaction-aware LINQ root should exist via `ILiteCollection<T>.AsQueryable(ILiteTransaction)`.
+3. `Query()` remains the first-class native fluent builder and escape hatch; LINQ is additive.
+4. Provider-backed `IQueryable<T>` supports synchronous composition only and async execution only.
+5. Sync enumeration / sync LINQ materialization for provider-backed queries must fail clearly rather than silently doing sync-over-async.
+6. Async LINQ execution may use `*Async` terminal extensions as an interoperability exception; this does not change the native LiteDbX async-only naming direction.
+7. Phase 1 MVP query-shaping operators are `Where`, `Select`, `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending`, `Skip`, and `Take`, plus async terminals such as `ToListAsync`, `FirstAsync`, `AnyAsync`, `CountAsync`, and `LongCountAsync`.
+8. Repository-level LINQ convenience is deferred unless a later phase has a narrow, compelling reason to add it.
+
 ## Existing Architecture To Reuse
 
 - `LiteDbX/Client/Database/ILiteCollection.cs`

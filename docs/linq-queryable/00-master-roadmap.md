@@ -38,7 +38,8 @@ The LINQ provider should be an adapter that translates `Queryable` method chains
 
 ### Target translation flow
 
-`IQueryable<T>` expression tree
+`collection.AsQueryable()` root
+→ `IQueryable<T>` expression tree
 → queryable-provider translation layer
 → normalized translation state / query specification
 → `Query` / native `LiteQueryable<T>`
@@ -52,6 +53,7 @@ The LINQ provider should be an adapter that translates `Queryable` method chains
 - bypassing the optimizer or pipes
 - promising complete LINQ parity with EF Core or LINQ to Objects
 - forcing synchronous materialization semantics into an async-first system
+- making provider-backed sync enumeration/materialization silently work via sync-over-async
 
 ---
 
@@ -94,7 +96,8 @@ Add parity tests, user-facing docs, diagnostics, and a staged rollout story.
 
 Ship these first:
 
-- queryable root, likely `AsQueryable()` or equivalent
+- queryable root via `ILiteCollection<T>.AsQueryable()`
+- transaction-aware root via `ILiteCollection<T>.AsQueryable(ILiteTransaction)`
 - `Where`
 - `Select`
 - `OrderBy`
@@ -114,6 +117,8 @@ Ship these first:
   - `CountAsync`
   - `LongCountAsync`
 
+Support async execution only for provider-backed `IQueryable<T>` queries. Sync enumeration and sync LINQ materializers should fail clearly with guidance to use the LiteDbX async terminals or fall back to `Query()`.
+
 Do **not** make V1 depend on:
 
 - `Join`
@@ -122,22 +127,29 @@ Do **not** make V1 depend on:
 - nested queryable subqueries
 - set operators
 - full LINQ `GroupBy` / `IGrouping<TKey, TElement>` semantics
+- repository-specific LINQ entrypoints
 
 ---
 
 ## Key Decisions To Make Early
 
 ### 1. Public entrypoint shape
-Recommended answer: introduce a separate queryable adapter such as `AsQueryable()` instead of making the current `LiteQueryable<T>` itself carry the full `IQueryable<T>` contract.
+Phase 1 answer: introduce a separate queryable adapter on `ILiteCollection<T>` via `AsQueryable()` instead of making the current `LiteQueryable<T>` itself carry the full `IQueryable<T>` contract.
 
 ### 2. Sync enumeration policy
-Recommended answer: do not silently support sync-over-async. Provide async terminals and fail fast for unsupported sync execution paths.
+Phase 1 answer: do not silently support sync-over-async. Provider-backed LINQ queries support sync composition only and execute through async terminal extensions; unsupported sync execution paths must fail fast.
 
 ### 3. Translation boundary
-Recommended answer: keep `BsonMapper.GetExpression(...)` and `LinqExpressionVisitor` focused on lambda/body translation; add a separate method-chain translator for `Queryable.*` calls.
+Phase 1 answer: keep `BsonMapper.GetExpression(...)` and `LinqExpressionVisitor` focused on lambda/body translation; add a separate method-chain translator for `Queryable.*` calls.
 
 ### 4. GroupBy scope
-Recommended answer: support grouped aggregate projections later, not full `IGrouping` semantics in the first release.
+Phase 1 answer: support grouped aggregate projections later, not full `IGrouping` semantics in the first release.
+
+### 5. Repository convenience scope
+Phase 1 answer: repository-level LINQ convenience is deferred. The collection-root entrypoint is the design anchor.
+
+### 6. Mutable state safety
+Phase 1 answer: later phases should avoid building the provider directly on shared mutable `LiteQueryable<T>` / `Query` instances; use separate translation state and lower into the native query model at the boundary.
 
 ---
 

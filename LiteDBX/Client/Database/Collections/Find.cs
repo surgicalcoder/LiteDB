@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,6 +27,27 @@ public partial class LiteCollection<T>
         return new LiteQueryable<T>(_engine, _mapper, Name, new Query(), transaction).Include(_includes);
     }
 
+    /// <summary>
+    /// Return a provider-backed LINQ query root.
+    /// Composition is synchronous and lowers into the native query model in later phases.
+    /// </summary>
+    public IQueryable<T> AsQueryable()
+    {
+        return AsQueryable(null);
+    }
+
+    /// <summary>
+    /// Return a provider-backed LINQ query root bound to the provided explicit transaction.
+    /// </summary>
+    public IQueryable<T> AsQueryable(ILiteTransaction transaction)
+    {
+        var root = new global::LiteDbX.LiteDbXQueryRoot(_engine, _mapper, Name, typeof(T), _includes, transaction);
+        var provider = new global::LiteDbX.LiteDbXQueryProvider(root);
+        var state = global::LiteDbX.LiteDbXQueryState.CreateRoot(root);
+
+        return new global::LiteDbX.LiteDbXQueryable<T>(provider, state);
+    }
+
     #region Find
 
     /// <summary>Stream documents matching a BsonExpression predicate.</summary>
@@ -45,7 +67,7 @@ public partial class LiteCollection<T>
             .ToEnumerable(cancellationToken);
     }
 
-    /// <summary>Stream documents matching a structured <see cref="Query"/>.</summary>
+    /// <summary>Stream documents matching a structured <see cref="global::LiteDbX.Query"/>.</summary>
     public IAsyncEnumerable<T> Find(
         Query query,
         int skip = 0,
@@ -108,7 +130,7 @@ public partial class LiteCollection<T>
         return FindOne(_mapper.GetExpression(predicate), cancellationToken);
     }
 
-    /// <summary>Find the first document matching a structured <see cref="Query"/>. Returns <c>null</c> if not found.</summary>
+    /// <summary>Find the first document matching a structured <see cref="global::LiteDbX.Query"/>. Returns <c>null</c> if not found.</summary>
     public ValueTask<T> FindOne(Query query, CancellationToken cancellationToken = default)
     {
         return new LiteQueryable<T>(_engine, _mapper, Name, query).FirstOrDefault(cancellationToken);
@@ -128,7 +150,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(global::LiteDbX.Query.Near(GetFieldExpression(field), center, radiusMeters), skip, limit, cancellationToken);
+        return Find(Query.Near(GetFieldExpression(field), center, radiusMeters), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindWithinBoundingBox(
@@ -141,7 +163,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(global::LiteDbX.Query.WithinBoundingBox(GetFieldExpression(field), minLat, minLon, maxLat, maxLon), skip, limit, cancellationToken);
+        return Find(Query.WithinBoundingBox(GetFieldExpression(field), minLat, minLon, maxLat, maxLon), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindWithin(
@@ -151,7 +173,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(global::LiteDbX.Query.Within(GetFieldExpression(field), polygon), skip, limit, cancellationToken);
+        return Find(Query.Within(GetFieldExpression(field), polygon), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindIntersects(
@@ -161,7 +183,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(global::LiteDbX.Query.Intersects(GetFieldExpression(field), shape), skip, limit, cancellationToken);
+        return Find(Query.Intersects(GetFieldExpression(field), shape), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindContainsPoint(
@@ -171,7 +193,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(global::LiteDbX.Query.ContainsPoint(GetFieldExpression(field), point), skip, limit, cancellationToken);
+        return Find(Query.ContainsPoint(GetFieldExpression(field), point), skip, limit, cancellationToken);
     }
 
     #endregion

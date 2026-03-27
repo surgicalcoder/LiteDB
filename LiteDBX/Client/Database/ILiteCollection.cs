@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +12,7 @@ namespace LiteDbX;
 /// <summary>
 /// Async-only contract for a typed document collection.
 ///
-/// Query composition methods (<see cref="Include{K}"/>, <see cref="Query"/>) remain synchronous
+/// Query composition methods such as <see cref="Include{K}"/> and the native query builder entrypoints remain synchronous
 /// because they build expression trees without touching storage.
 /// All operations that read from or write to storage are async.
 /// </summary>
@@ -36,7 +37,10 @@ public interface ILiteCollection<T>
     /// </summary>
     ILiteCollection<T> Include<K>(Expression<Func<T, K>> keySelector);
 
-    /// <inheritdoc cref="Include{K}(Expression{Func{T,K}})"/>
+    /// <summary>
+    /// Register a DbRef path to be eagerly loaded in query results using a raw <see cref="BsonExpression"/>.
+    /// Returns a new collection instance with the include registered.
+    /// </summary>
     ILiteCollection<T> Include(BsonExpression keySelector);
 
     // ── Upsert ────────────────────────────────────────────────────────────────
@@ -130,12 +134,24 @@ public interface ILiteCollection<T>
     /// </summary>
     ILiteQueryable<T> Query(ILiteTransaction transaction);
 
+    /// <summary>
+    /// Return a provider-backed LINQ query root.
+    /// Composition remains synchronous; execution is performed later via LiteDbX async queryable terminals.
+    /// </summary>
+    IQueryable<T> AsQueryable();
+
+    /// <summary>
+    /// Return a provider-backed LINQ query root bound to the provided explicit transaction.
+    /// Composition remains synchronous; execution is performed later via LiteDbX async queryable terminals.
+    /// </summary>
+    IQueryable<T> AsQueryable(ILiteTransaction transaction);
+
     // ── Find / Enumerate ──────────────────────────────────────────────────────
 
     /// <summary>Stream documents matching a BsonExpression predicate.</summary>
     IAsyncEnumerable<T> Find(BsonExpression predicate, int skip = 0, int limit = int.MaxValue, CancellationToken cancellationToken = default);
 
-    /// <summary>Stream documents matching a structured <see cref="Query"/>.</summary>
+    /// <summary>Stream documents matching a structured <see cref="global::LiteDbX.Query"/>.</summary>
     IAsyncEnumerable<T> Find(Query query, int skip = 0, int limit = int.MaxValue, CancellationToken cancellationToken = default);
 
     /// <summary>Stream documents matching a LINQ predicate.</summary>
@@ -156,7 +172,7 @@ public interface ILiteCollection<T>
     /// <summary>Find the first document matching a LINQ predicate. Returns <c>null</c> if not found.</summary>
     ValueTask<T> FindOne(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default);
 
-    /// <summary>Find the first document matching a structured <see cref="Query"/>. Returns <c>null</c> if not found.</summary>
+    /// <summary>Find the first document matching a structured <see cref="global::LiteDbX.Query"/>. Returns <c>null</c> if not found.</summary>
     ValueTask<T> FindOne(Query query, CancellationToken cancellationToken = default);
 
     /// <summary>Stream all documents in this collection, ordered by <c>_id</c>.</summary>
@@ -229,7 +245,7 @@ public interface ILiteCollection<T>
     /// <summary>Count documents matching a LINQ predicate.</summary>
     ValueTask<int> Count(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default);
 
-    /// <summary>Count documents matching a structured <see cref="Query"/>.</summary>
+    /// <summary>Count documents matching a structured <see cref="global::LiteDbX.Query"/>.</summary>
     ValueTask<int> Count(Query query, CancellationToken cancellationToken = default);
 
     /// <summary>Count documents whose point field lies within the specified radius of <paramref name="center"/>.</summary>
@@ -262,7 +278,7 @@ public interface ILiteCollection<T>
     /// <summary>Count documents matching a LINQ predicate as a <c>long</c>.</summary>
     ValueTask<long> LongCount(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default);
 
-    /// <summary>Count documents matching a structured <see cref="Query"/> as a <c>long</c>.</summary>
+    /// <summary>Count documents matching a structured <see cref="global::LiteDbX.Query"/> as a <c>long</c>.</summary>
     ValueTask<long> LongCount(Query query, CancellationToken cancellationToken = default);
 
     /// <summary>Returns <c>true</c> if any document matches a BsonExpression predicate.</summary>
@@ -277,7 +293,7 @@ public interface ILiteCollection<T>
     /// <summary>Returns <c>true</c> if any document matches a LINQ predicate.</summary>
     ValueTask<bool> Exists(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default);
 
-    /// <summary>Returns <c>true</c> if any document matches a structured <see cref="Query"/>.</summary>
+    /// <summary>Returns <c>true</c> if any document matches a structured <see cref="global::LiteDbX.Query"/>.</summary>
     ValueTask<bool> Exists(Query query, CancellationToken cancellationToken = default);
 
     // ── Min / Max ─────────────────────────────────────────────────────────────

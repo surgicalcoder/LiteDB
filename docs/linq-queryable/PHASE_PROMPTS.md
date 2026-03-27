@@ -26,6 +26,16 @@ Every prompt below assumes this non-negotiable architecture:
 - Keep the native `Query()` builder first-class.
 - Prefer async execution semantics and avoid hidden sync-over-async behavior.
 
+If Phase 1 has already been completed, also preserve these frozen contract decisions:
+
+- LINQ starts from `ILiteCollection<T>.AsQueryable()`.
+- A transaction-aware LINQ root should exist via `ILiteCollection<T>.AsQueryable(ILiteTransaction)`.
+- `Query()` remains the first-class native builder and escape hatch.
+- Provider-backed `IQueryable<T>` supports synchronous composition only and async execution only.
+- Sync enumeration and sync LINQ materializers for provider-backed queries must fail clearly.
+- Async LINQ execution may use `*Async` terminal extensions as an interoperability exception.
+- Phase 1 MVP query-shaping scope is `Where`, `Select`, `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending`, `Skip`, and `Take`, with async terminals such as `ToListAsync`, `FirstAsync`, `AnyAsync`, `CountAsync`, and `LongCountAsync`.
+
 ---
 
 # Prompt 1 — Phase 1: Public Surface and Contracts

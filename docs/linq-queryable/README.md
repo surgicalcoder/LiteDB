@@ -16,6 +16,18 @@ These rules apply to every phase unless a later decision document explicitly rep
 6. Unsupported LINQ constructs must fail clearly and predictably.
 7. Favor parity with existing query-builder behavior over broad but fragile LINQ coverage.
 
+## Phase 1 Contract Snapshot
+
+The following contract decisions are frozen by Phase 1 and should be treated as baseline assumptions for later phases:
+
+1. LINQ starts from `ILiteCollection<T>.AsQueryable()`.
+2. A transaction-aware root should also exist via `ILiteCollection<T>.AsQueryable(ILiteTransaction)`.
+3. `Query()` remains the first-class native builder and advanced escape hatch.
+4. Provider-backed `IQueryable<T>` supports synchronous composition only; execution is async-only.
+5. Sync enumeration and sync LINQ materializers are not supported for provider-backed LiteDbX queries and must fail clearly.
+6. The LINQ adapter may expose `*Async` terminal extensions as an interoperability exception, even though the native async-only LiteDbX API keeps plain method names.
+7. Phase 1 MVP scope is limited to `Where`, `Select`, `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending`, `Skip`, `Take`, plus async terminals such as `ToListAsync`, `FirstAsync`, `AnyAsync`, `CountAsync`, and `LongCountAsync`.
+
 ## Recommended Execution Order
 
 1. `00-master-roadmap.md`
@@ -30,8 +42,8 @@ These rules apply to every phase unless a later decision document explicitly rep
 
 At the end of this roadmap, LiteDbX should support a practical LINQ experience such as:
 
-- `collection.AsQueryable().Where(x => x.Age > 18)`
-- `collection.AsQueryable().OrderBy(x => x.Name).Select(x => new { x.Id, x.Name })`
+- `await collection.AsQueryable().Where(x => x.Age > 18).ToListAsync()`
+- `await collection.AsQueryable().OrderBy(x => x.Name).Select(x => new { x.Id, x.Name }).ToArrayAsync()`
 - async terminals such as `ToListAsync`, `FirstAsync`, `CountAsync`, and `AnyAsync`
 
 while still preserving the existing native query builder:
@@ -49,6 +61,7 @@ This roadmap is **not** for:
 - rebuilding the optimizer or execution pipeline from scratch
 - promising EF Core-level LINQ coverage
 - introducing sync-over-async as the default execution model
+- making `LiteQueryable<T>` itself become the full `IQueryable<T>` provider
 
 ## Suggested Inputs For Any Future Session
 

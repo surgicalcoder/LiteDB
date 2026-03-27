@@ -4,7 +4,15 @@
 
 Introduce the provider-side architecture needed to parse `Queryable` method chains without disturbing the current query engine.
 
-This phase is about shape and responsibilities, not about broad operator support yet.
+This phase locks the ownership model for:
+
+- provider-backed query roots
+- expression-tree parsing
+- normalized translation state
+- lowering into a fresh native `Query`
+- mutability rules that avoid cross-query contamination
+
+It does **not** attempt broad operator execution yet.
 
 ## Existing Files To Study
 
@@ -16,121 +24,217 @@ This phase is about shape and responsibilities, not about broad operator support
 - `LiteDbX/Client/Mapper/Linq/LinqExpressionVisitor.cs`
 - `LiteDbX/Client/Structures/Query.cs`
 
-## Main Design Objective
+## Final Phase 2 Decisions
 
-Create a dedicated LINQ-provider layer that translates `System.Linq.Queryable` expression trees into the existing LiteDbX query model.
+### 1. Provider/root types
 
-## Work Packages
+#### Chosen types
 
-### P2.1 — Define the provider/root types
+- `ILiteCollection<T>.AsQueryable()` / `AsQueryable(ILiteTransaction)` remain the public LINQ roots
+- `LiteDbXQueryable<T>` is the provider-backed wrapper implementing `IQueryable<T>` and `IOrderedQueryable<T>`
+- `LiteDbXQueryProvider` owns provider-facing expression parsing and queryable creation
+- `LiteDbXQueryRoot` holds immutable collection-root context
 
-#### Goal
-Introduce the types that represent a provider-backed LINQ query.
+#### Why this shape was chosen
 
-#### Recommended components
-- a provider type, e.g. `LiteDbXQueryProvider`
-- a queryable root/wrapper type, e.g. `LiteDbXQueryable<T>`
-- optional internal executor/helper type if separation improves clarity
+- It keeps the LINQ-facing wrapper clearly separate from the existing native `LiteQueryable<T>` builder.
+- It lets `Query()` and `LiteQueryable<T>` remain the first-class native API.
+- It keeps transaction context and collection identity attached to the LINQ root without leaking native mutable `Query` instances into expression composition.
 
-#### Important note
-Avoid naming collisions with the existing `LiteQueryable<T>` fluent builder. Keep the new queryable facade clearly distinct.
+#### Provider responsibility list
+`LiteDbXQueryProvider` is responsible for:
 
-#### Acceptance criteria
-- one documented provider type responsibility list
-- one documented queryable root responsibility list
-- clear separation from `LiteQueryable<T>`
+1. accepting `Queryable.*` expression trees from the LINQ surface
+2. translating those trees into normalized LiteDbX query state
+3. creating new `LiteDbXQueryable<T>` wrappers for shaped queries
+4. rejecting sync execution paths with clear diagnostics
+5. exposing the lowering boundary from provider state into a fresh native `Query`
+
+#### Queryable wrapper responsibility list
+`LiteDbXQueryable<T>` is responsible for:
+
+1. carrying `Expression`, `ElementType`, `Provider`, and immutable provider state
+2. representing the current LINQ chain as an `IQueryable<T>`
+3. preventing synchronous enumeration by failing fast
 
 ---
 
-### P2.2 — Define the translation boundary
+### 2. Translation boundary
 
-#### Goal
-Keep method-chain translation separate from lambda/body translation.
+#### Final rule
+- `LiteDbXQueryProvider` / `LiteDbXQueryParser` own `Queryable.*` method-chain parsing
+- `BsonMapper.GetExpression(...)` and `LinqExpressionVisitor` remain the owners of leaf lambda translation
+- `LiteDbXQueryLowerer` owns replaying normalized provider state into a fresh native `Query`
 
-#### Recommended rule
-- `Queryable.Where`, `Queryable.Select`, `Queryable.OrderBy`, etc. are parsed by a provider-side translator
-- lambda bodies continue to flow through `BsonMapper.GetExpression(...)` / `LinqExpressionVisitor`
+#### Boundary detail
+
+The provider parses shapes like:
+
+- `Queryable.Where`
+- `Queryable.Select`
+- `Queryable.OrderBy`
+- `Queryable.ThenBy`
+- `Queryable.Skip`
+- `Queryable.Take`
+
+but it does **not** interpret lambda bodies itself. Instead, it stores the unwrapped `LambdaExpression` on normalized state and only later calls back into `BsonMapper.GetExpression(...)` when lowering to native query semantics.
 
 #### Why this matters
-`LinqExpressionVisitor` is already good at translating expressions like `x => x.Age > 10`, but it is not the right place to interpret full queryable method chains.
 
-#### Acceptance criteria
-A clear written boundary between:
-
-- method-chain translation
-- leaf lambda translation
-- execution lowering
+`LinqExpressionVisitor` already knows how to translate bodies like `x => x.Age > 10` or `x => new { x.Id, x.Name }` into `BsonExpression` form. It should not become responsible for interpreting full `Queryable` method chains or provider execution rules.
 
 ---
 
-### P2.3 — Define the internal state model
+### 3. Internal translation-state model
 
-#### Goal
-Represent the partially-translated query in a way that is safe, inspectable, and composable.
+#### Chosen shape
 
-#### Recommended shape
-Use an internal translation state or query specification that can capture:
+Phase 2 uses an immutable/copy-on-write normalized state model split into these pieces:
 
-- source collection name
+##### `LiteDbXQueryRoot`
+Immutable root context captured once at `AsQueryable()` creation time:
+
+- engine reference
+- mapper reference
+- collection name
 - root entity type
-- current result type
-- filters
-- ordering
-- skip/take
-- projection
-- includes
-- grouping metadata
-- selected terminal operator
-- transaction context
-- flags for grouped/scalar/document projections
+- inherited include paths from the collection
+- optional explicit transaction
 
-#### Why not mutate `Query` directly from the start?
-Because method-chain parsing is easier to reason about using a normalized intermediate model, and the current fluent builder already shows shared-state risk around `_query` mutation.
+##### `LiteDbXQueryOperator`
+An immutable descriptor for one parsed query-shaping operator:
 
-#### Acceptance criteria
-- written list of state fields
-- rule for when state becomes a concrete `Query`
-- rule for how to avoid cross-query contamination
+- method kind (`Where`, `Select`, `OrderBy`, etc.)
+- original `MethodCallExpression`
+- optional `LambdaExpression`
+- optional value expression (for `Skip` / `Take`)
+- optional result type metadata
+
+##### `LiteDbXQueryState`
+An immutable snapshot of the current query chain:
+
+- root context
+- root entity type
+- current result element type
+- ordered operator list
+- projection flags (`HasProjection`, scalar/document projection)
+- grouping flag placeholder
+- terminal intent placeholder
+- original query expression for diagnostics/debugging
+
+#### Lowering boundary
+
+The provider state is the authoritative intermediate model during LINQ composition.
+
+Only at the lowering boundary should LiteDbX create a fresh native `Query` and replay provider state into it. That replay currently belongs to `LiteDbXQueryLowerer`.
+
+#### Why not mutate `Query` directly during parsing?
+
+- `LiteQueryable<T>` already demonstrates shared-state hazards by mutating `_query` directly.
+- Some native aggregate paths temporarily replace `Select`, then restore it.
+- Directly mutating `Query` while parsing expression trees would make query reuse and branching far more fragile.
 
 ---
 
-### P2.4 — Decide mutability/cloning strategy
+### 4. Mutability / cloning rules
 
-#### Goal
-Prevent one queryable chain from corrupting another.
+#### Final decision
+Use immutable root context plus copy-on-write query state snapshots.
 
-#### Risk anchor
-`LiteQueryable<T>` currently mutates a shared `_query`, and aggregate methods temporarily replace `Select` and then restore it. A provider that reuses mutable query instances carelessly will become fragile.
+#### Rules
 
-#### Recommended direction
-Use either:
+1. `LiteDbXQueryRoot` is immutable and shared safely.
+2. `LiteDbXQueryState` is immutable; every appended operator returns a new snapshot.
+3. Parsed operators are immutable value-like descriptors.
+4. Lowering always creates a **fresh** native `Query`.
+5. Provider composition must never reuse a mutable `LiteQueryable<T>` or mutable `Query` instance as its working state.
 
-- immutable translation state, or
-- copy-on-write snapshots until final lowering into `Query`
+#### Result
+Branching query chains such as:
 
-#### Acceptance criteria
-- documented mutability policy
-- documented cloning/snapshot rules
-- no ambiguity about reuse of translated queries
+```csharp
+var baseQuery = collection.AsQueryable().Where(x => x.Active);
+var ordered = baseQuery.OrderBy(x => x.Name);
+var projected = baseQuery.Select(x => x.Id);
+```
 
-## Deliverables
+can be represented without one branch corrupting another.
 
-- provider/root architecture plan
-- translation-boundary rules
-- internal state-model definition
-- mutability/cloning decision
+## Phase 2 Scaffold Added
+
+The current scaffold is intentionally narrow and architecture-focused:
+
+- `ILiteCollection<T>.AsQueryable()`
+- `ILiteCollection<T>.AsQueryable(ILiteTransaction)`
+- `LiteDbXQueryable<T>`
+- `LiteDbXQueryProvider`
+- `LiteDbXQueryRoot`
+- `LiteDbXQueryOperator`
+- `LiteDbXQueryState`
+- `LiteDbXQueryParser`
+- `LiteDbXQueryLowerer`
+- lambda/value-expression helper utilities for parser/lowering support
+
+What this scaffold does now:
+
+- creates provider-backed query roots
+- parses supported query-shaping methods into normalized immutable state
+- provides a fresh-`Query` lowering path for the parsed state
+- fails fast for synchronous provider execution
+
+What this scaffold does **not** claim yet:
+
+- broad operator support beyond Phase 1 MVP shapes
+- async terminal execution implementation
+- public user-facing LINQ terminal extensions
+- full grouping support
+
+## Sample Flow: `Where -> OrderBy -> Select -> CountAsync`
+
+This is the intended ownership flow for later phases:
+
+1. `collection.AsQueryable()` creates a `LiteDbXQueryRoot`, `LiteDbXQueryProvider`, and root `LiteDbXQueryable<T>`.
+2. `Queryable.Where(...)` calls into `LiteDbXQueryProvider.CreateQuery(...)`.
+3. `LiteDbXQueryParser` parses the `Where` method call and appends a `LiteDbXQueryOperator` describing that step.
+4. `Queryable.OrderBy(...)` repeats the process, producing a new immutable `LiteDbXQueryState` with an additional ordering operator.
+5. `Queryable.Select(...)` adds projection metadata and stores the quoted projection lambda on state.
+6. `CountAsync()` in a later phase should mark terminal intent, lower the normalized state through `LiteDbXQueryLowerer`, and then execute through the native query path.
+7. During lowering, each stored lambda is translated through `BsonMapper.GetExpression(...)`, producing native `BsonExpression` values for a fresh `Query`.
+8. That `Query` then flows through the existing `QueryOptimization` → `QueryPlan` → `QueryExecutor` / pipeline path.
+
+## Why This Preserves the Current System
+
+This design preserves the current LiteDbX architecture because:
+
+1. `Query()` and `LiteQueryable<T>` remain untouched as the native fluent API.
+2. The provider lowers into a native `Query` instead of bypassing the engine.
+3. Lambda translation still goes through the existing mapper/visitor path.
+4. The provider works with separate immutable translation state, avoiding the mutable `_query` behavior of the native builder during LINQ composition.
+5. Sync execution is still rejected rather than hidden behind sync-over-async.
+
+## Deliverables Completed By This Phase
+
+- provider/root architecture scaffold
+- explicit translation-boundary ownership
+- immutable translation-state model
+- fresh-`Query` lowering boundary
+- copy-on-write mutability rules
 
 ## Validation
 
-- trace a hypothetical chain `Where -> OrderBy -> Select -> CountAsync`
-- verify each stage has a clear owner
-- verify the design still lowers into the existing `Query()` / engine path
+Use these checks while reviewing this phase:
+
+- trace `Where -> OrderBy -> Select -> CountAsync`
+- verify parsing, lambda translation, and lowering each have distinct owners
+- verify the lowering target is native `Query`, not a replacement execution path
+- verify the provider shell does not force `LiteQueryable<T>` to become the only `IQueryable<T>` implementation
 
 ## Out of Scope
 
 - full operator support
-- terminal execution implementation
+- async terminal execution implementation
 - grouping implementation
+- provider result materialization
 - user-facing docs beyond architecture notes
 
 ## Exit Criteria
