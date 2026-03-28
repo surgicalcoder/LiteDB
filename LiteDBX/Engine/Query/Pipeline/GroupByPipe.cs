@@ -112,11 +112,6 @@ internal class GroupByPipe : BasePipe
             }
             else
             {
-                groupBy.Select.Parameters["key"] = current;
-                if (groupBy.Having != null)
-                {
-                    groupBy.Having.Parameters["key"] = current;
-                }
 
                 // stop current sequence
                 yield break;

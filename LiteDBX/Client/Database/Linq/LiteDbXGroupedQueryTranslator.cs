@@ -119,7 +119,7 @@ internal static class LiteDbXGroupedQueryTranslator
             ? TranslatePredicate(context, binary.Right)
             : TranslateViaMapper(context, binary.Right);
 
-        return GroupedFragment.Combine(left, right, $"({left.Source}{GetBinaryOperator(binary.NodeType)}{right.Source})");
+        return GroupedFragment.Combine(left, right, GetBinaryOperator(binary.NodeType));
     }
 
     private static bool IsPredicateOperand(Expression expression, ParameterExpression groupParameter)
@@ -487,16 +487,14 @@ internal static class LiteDbXGroupedQueryTranslator
         public static GroupedFragment FromExpression(BsonExpression expression)
             => new(expression.Source, expression.Parameters ?? new BsonDocument());
 
-        public static GroupedFragment Combine(GroupedFragment left, GroupedFragment right, string source)
+        public static GroupedFragment Combine(GroupedFragment left, GroupedFragment right, string @operator)
         {
             var parameters = new BsonDocument();
             var parameterIndex = 0;
-            var mergedSource = source;
+            var leftSource = MergeInto(parameters, left, left.Source, ref parameterIndex);
+            var rightSource = MergeInto(parameters, right, right.Source, ref parameterIndex);
 
-            mergedSource = MergeInto(parameters, left, mergedSource, ref parameterIndex);
-            mergedSource = MergeInto(parameters, right, mergedSource, ref parameterIndex);
-
-            return new GroupedFragment(mergedSource, parameters);
+            return new GroupedFragment($"({leftSource}{@operator}{rightSource})", parameters);
         }
 
         public BsonExpression ToExpression() => BsonExpression.Create(Source, Parameters);
