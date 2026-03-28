@@ -14,6 +14,7 @@ internal interface ILiteDbXQueryableAccessor
 internal enum LiteDbXQueryMethodKind
 {
     Where,
+    GroupBy,
     Select,
     OrderBy,
     OrderByDescending,
@@ -154,6 +155,8 @@ internal sealed class LiteDbXQueryState
     public bool HasPaging => HasOffset || HasLimit;
 
     public bool HasProjection { get; }
+
+    public bool HasGroupedProjection => IsGrouped && HasProjection;
 
     public bool IsScalarProjection { get; }
 

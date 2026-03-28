@@ -20,7 +20,7 @@ LiteDB is a small, fast and lightweight .NET NoSQL embedded database.
 - Store files and stream data (like GridFS in MongoDB)
 - Single data file storage (like SQLite)
 - Index document fields for fast search
-- LINQ support for queries
+- LINQ predicate translation plus a provider-backed `IQueryable<T>` subset for supported query shapes
 - SQL-Like commands to access/transform data
 - [LiteDB Studio](https://github.com/mbdavid/LiteDB.Studio) - Nice UI for data access 
 - Open source and free for everyone - including commercial use
@@ -94,7 +94,7 @@ using(var db = new LiteDatabase(@"MyData.db"))
 
     col.Update(customer);
 
-    // Use LINQ to query documents (with no index)
+    // Use a predicate expression to query documents
     var results = col.Find(x => x.Age > 20);
 }
 ```
@@ -140,6 +140,150 @@ using(var db = new LiteDatabase("MyOrderDatafile.db"))
 }
 
 ```
+
+## Query APIs: native `Query()` and provider-backed LINQ
+
+LiteDbX exposes **two complementary query surfaces**:
+
+- `collection.Query()` — the native, first-class LiteDbX query builder
+- `collection.AsQueryable()` — an additive LINQ / `IQueryable<T>` adapter for supported query shapes
+
+`AsQueryable()` does **not** replace `Query()`.
+
+Provider-backed LINQ queries are translated back into the same native LiteDbX query model and execution pipeline used by `Query()`.
+
+### When to use `Query()`
+
+Prefer `Query()` when you need:
+
+- the full native LiteDbX query surface
+- direct `BsonExpression` control
+- advanced/manual grouped queries
+- the clearest escape hatch for unsupported LINQ shapes
+
+### When to use `AsQueryable()`
+
+Use `AsQueryable()` when you want supported single-source LINQ composition over a collection root and are happy to execute it through LiteDbX async queryable terminals.
+
+### Starting a LINQ query
+
+```csharp
+var rows = await customers
+    .AsQueryable()
+    .Where(x => x.IsActive)
+    .OrderBy(x => x.Name)
+    .Select(x => new { x.Id, x.Name })
+    .ToListAsync();
+```
+
+Transaction-aware roots are also available:
+
+```csharp
+await using var tx = await db.BeginTransaction();
+
+var names = await customers
+    .AsQueryable(tx)
+    .Where(x => x.IsActive)
+    .Select(x => x.Name)
+    .ToArrayAsync();
+```
+
+### Async-only execution for provider-backed `IQueryable<T>`
+
+Provider-backed LINQ queries compose synchronously but execute asynchronously.
+
+Use LiteDbX async terminals such as:
+
+- `ToListAsync()`
+- `ToArrayAsync()`
+- `FirstAsync()`
+- `FirstOrDefaultAsync()`
+- `SingleAsync()`
+- `SingleOrDefaultAsync()`
+- `AnyAsync()`
+- `CountAsync()`
+- `LongCountAsync()`
+- `GetPlanAsync()`
+
+Do **not** rely on synchronous enumeration/materialization for provider-backed `IQueryable<T>` queries. Those paths are expected to fail clearly rather than silently using sync-over-async execution.
+
+### Supported LINQ subset
+
+The provider is intentionally narrower than full LINQ-to-Objects or EF-style providers.
+
+Supported core operators include:
+
+- `Where`
+- `Select`
+- `OrderBy`
+- `OrderByDescending`
+- `ThenBy`
+- `ThenByDescending`
+- `Skip`
+- `Take`
+
+Supported grouped LINQ is intentionally **narrow** and engine-aligned:
+
+- `GroupBy(key)`
+- optional grouped `Where(...)` lowering to native `HAVING`
+- grouped aggregate projections such as:
+  - `Select(g => new { g.Key, Count = g.Count() })`
+  - `Select(g => new { g.Key, Sum = g.Sum(x => x.SomeField) })`
+
+### Unsupported or deferred LINQ shapes
+
+Use `collection.Query()` instead for shapes such as:
+
+- `Join`
+- `GroupJoin`
+- `SelectMany`
+- set operators (`Union`, `Intersect`, `Except`)
+- nested queryable subqueries
+- raw `IGrouping<TKey, TElement>` materialization
+- nested grouped composition / grouped element projection
+- advanced/manual grouped queries beyond grouped aggregate projections
+
+### Native `Query()` remains the advanced escape hatch
+
+For full control, use the native query builder directly:
+
+```csharp
+var rows = await customers.Query()
+    .Where(x => x.IsActive)
+    .OrderBy(x => x.Name)
+    .Select(x => new { x.Id, x.Name })
+    .ToArray();
+```
+
+For grouped/manual queries, prefer the native builder explicitly:
+
+```csharp
+var grouped = await customers.Query()
+    .GroupBy(BsonExpression.Create("$.Age"))
+    .Having(BsonExpression.Create("COUNT(*._id) >= 2"))
+    .Select(BsonExpression.Create("{ Age: @key, Count: COUNT(*._id) }"))
+    .ToArray();
+```
+
+### Debugging translated LINQ queries
+
+Use `GetPlanAsync()` to inspect how a provider-backed query will execute:
+
+```csharp
+var plan = await customers
+    .AsQueryable()
+    .Where(x => x.IsActive)
+    .OrderBy(x => x.Name)
+    .Select(x => new { x.Id, x.Name })
+    .GetPlanAsync();
+```
+
+### Rollout / support guidance
+
+- `Query()` remains the primary native query API
+- `AsQueryable()` is additive and production-oriented for the documented supported subset
+- grouped LINQ should be understood as a conservative subset, not full `IGrouping<TKey, TElement>` parity
+- unsupported LINQ patterns are expected to fail clearly and point callers back to `Query()`
 
 ## Where to use?
 

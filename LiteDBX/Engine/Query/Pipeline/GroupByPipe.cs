@@ -79,6 +79,10 @@ internal class GroupByPipe : BasePipe
                 var key = groupBy.Expression.ExecuteScalar(enumerator.Current, _pragmas.Collation);
 
                 groupBy.Select.Parameters["key"] = key;
+                if (groupBy.Having != null)
+                {
+                    groupBy.Having.Parameters["key"] = key;
+                }
 
                 var group = YieldDocuments(key, enumerator, groupBy, done);
 
@@ -94,7 +98,9 @@ internal class GroupByPipe : BasePipe
     {
         yield return enumerator.Current;
 
-        while (done.Running = enumerator.MoveNext())
+        done.Running = enumerator.MoveNext();
+
+        while (done.Running)
         {
             var current = groupBy.Expression.ExecuteScalar(enumerator.Current, _pragmas.Collation);
 
@@ -102,10 +108,15 @@ internal class GroupByPipe : BasePipe
             {
                 // yield return document in same key (group)
                 yield return enumerator.Current;
+                done.Running = enumerator.MoveNext();
             }
             else
             {
                 groupBy.Select.Parameters["key"] = current;
+                if (groupBy.Having != null)
+                {
+                    groupBy.Having.Parameters["key"] = current;
+                }
 
                 // stop current sequence
                 yield break;

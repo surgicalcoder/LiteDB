@@ -134,6 +134,81 @@ public class Queryable_Translation_Tests
     }
 
     [Fact]
+    public async Task Queryable_MultiWhere_With_ArrayContains_And_StringFilter_Lowers_And_Executes_Like_Native_Query()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, local) = db.GetData();
+
+        var ids = new[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+
+        var queryable = collection.AsQueryable()
+            .Where(x => x.Age >= 10 && x.Age <= 40)
+            .Where(x => x.Name.StartsWith("Ge"))
+            .Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name });
+
+        var lowered = queryable.ToQuery();
+
+        var expectedNative = await collection.Query()
+            .Where(x => x.Age >= 10 && x.Age <= 40)
+            .Where(x => x.Name.StartsWith("Ge"))
+            .Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name })
+            .ToArray();
+
+        var expectedLocal = local
+            .Where(x => x.Age >= 10 && x.Age <= 40)
+            .Where(x => x.Name.StartsWith("Ge"))
+            .Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name })
+            .ToArray();
+
+        var actual = await queryable.ToNativeQueryable().ToArray();
+
+        lowered.Where.Should().HaveCount(3);
+
+        actual.Should().Equal(expectedNative);
+        actual.Should().Equal(expectedLocal);
+    }
+
+    [Fact]
+    public async Task Queryable_AsQueryable_With_Explicit_Transaction_Preserves_Transaction_And_Parity()
+    {
+        await using var db = new LiteDatabase(":memory:");
+        var collection = db.GetCollection<Person>("person");
+        var local = DataGen.Person().ToArray();
+
+        await collection.Insert(local);
+
+        await using var tx = await db.BeginTransaction();
+
+        var queryable = collection.AsQueryable(tx)
+            .Where(x => x.Id <= 5)
+            .OrderBy(x => x.Name)
+            .Select(x => x.Name);
+
+        var state = queryable.ToQueryState();
+
+        var expectedNative = await collection.Query(tx)
+            .Where(x => x.Id <= 5)
+            .OrderBy(x => x.Name)
+            .Select(x => x.Name)
+            .ToArray();
+
+        var expectedLocal = local
+            .Where(x => x.Id <= 5)
+            .OrderBy(x => x.Name)
+            .Select(x => x.Name)
+            .ToArray();
+
+        var actual = await queryable.ToArrayAsync();
+
+        state.Root.Transaction.Should().BeSameAs(tx);
+        actual.Should().Equal(expectedNative);
+        actual.Should().Equal(expectedLocal);
+    }
+
+    [Fact]
     public async Task Queryable_Unsupported_Join_Fails_Clearly()
     {
         await using var db = await PersonQueryData.CreateAsync();
@@ -146,6 +221,47 @@ public class Queryable_Translation_Tests
 
         act.Should().Throw<NotSupportedException>()
             .WithMessage("*Join*Query()*");
+    }
+
+    [Fact]
+    public async Task Queryable_Unsupported_GroupJoin_Fails_Clearly()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        var other = collection.AsQueryable();
+
+        Action act = () => _ = collection.AsQueryable()
+            .GroupJoin(other, x => x.Id, y => y.Id, (x, group) => new { x.Id, Count = group.Count() });
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*GroupJoin*Query()*");
+    }
+
+    [Fact]
+    public async Task Queryable_Unsupported_SelectMany_Fails_Clearly()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        Action act = () => _ = collection.AsQueryable()
+            .SelectMany(x => x.Phones);
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*SelectMany*Query()*");
+    }
+
+    [Fact]
+    public async Task Queryable_Unsupported_Union_Fails_Clearly()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        Action act = () => _ = collection.AsQueryable()
+            .Union(collection.AsQueryable());
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*Union*Query()*");
     }
 
     [Fact]
@@ -195,6 +311,33 @@ public class Queryable_Translation_Tests
 
         act.Should().Throw<NotSupportedException>()
             .WithMessage("*Skip*Take*Query()*");
+    }
+
+    [Fact]
+    public async Task Queryable_Unsupported_Grouped_OrderBy_Fails_Clearly()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        Action act = () => _ = collection.AsQueryable()
+            .GroupBy(x => x.Age)
+            .OrderBy(g => g.Key);
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*GroupBy*OrderBy*Query()*");
+    }
+
+    [Fact]
+    public async Task Queryable_Unsupported_GroupBy_ResultSelector_Overload_Fails_Clearly()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        Action act = () => _ = collection.AsQueryable()
+            .GroupBy(x => x.Age, (age, group) => new { Age = age, Count = group.Count() });
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*Only Queryable.GroupBy(source, keySelector)*collection.Query()*");
     }
 }
 

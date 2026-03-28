@@ -112,3 +112,115 @@ Every deferred operator has a documented failure mode and rationale.
 
 This phase is done when the team has a precise, engine-aligned definition of which grouped and advanced LINQ patterns are supported, deferred, or rejected, and that definition is backed by targeted tests or a concrete implementation backlog.
 
+---
+
+## Phase 5 Supported LINQ GroupBy Contract
+
+Phase 5 support is intentionally narrow and is defined by what already maps cleanly onto the existing native query engine:
+
+- `Query.GroupBy`
+- grouped `Query.Select`
+- optional `Query.Having`
+- existing grouped execution through `QueryOptimization` and `GroupByPipe`
+
+The LINQ provider is **not** attempting to expose general-purpose `IGrouping<TKey, TElement>` semantics.
+
+### Supported grouped query shape
+
+The supported provider shape is:
+
+- optional pre-group `Where(...)`
+- one `GroupBy(source, keySelector)`
+- optional grouped `Where(...)` that lowers to `HAVING`
+- one grouped `Select(...)`
+- optional `Skip(...)` / `Take(...)`
+- async materialization terminals such as `ToListAsync`, `ToArrayAsync`, `FirstAsync`, `FirstOrDefaultAsync`, `SingleAsync`, and `SingleOrDefaultAsync`
+
+In practice, the intended happy path is:
+
+- `GroupBy(key).Select(g => new { g.Key, Count = g.Count() })`
+- `GroupBy(key).Where(g => g.Count() >= 2).Select(g => new { g.Key, Count = g.Count() })`
+- `GroupBy(key).Select(g => new { g.Key, Sum = g.Sum(x => x.SomeNumber) })`
+
+### Supported grouped projection members
+
+Grouped `Select(...)` is limited to projections composed from:
+
+- `g.Key`
+- direct grouped aggregates over the group sequence:
+  - `g.Count()`
+  - `g.Sum(x => x.Field)`
+  - `g.Min(x => x.Field)`
+  - `g.Max(x => x.Field)`
+  - `g.Average(x => x.Field)`
+- document/object projections that only combine the above values
+
+Examples that fit the intended scope:
+
+- `GroupBy(x => x.Age).Select(g => new { Age = g.Key, Count = g.Count() })`
+- `GroupBy(x => x.Date.Year).Select(g => new { Year = g.Key, Sum = g.Sum(x => x.Age) })`
+
+### Supported grouped filtering (`HAVING`)
+
+Grouped `Where(...)` is supported only **after** `GroupBy(...)` and **before** the grouped `Select(...)`, and only when it can lower cleanly to `Query.Having`.
+
+Supported grouped predicate building blocks are limited to:
+
+- comparisons over `g.Key`
+- comparisons over direct grouped aggregates
+- boolean combinations of those comparisons
+
+Examples:
+
+- `GroupBy(x => x.Age).Where(g => g.Key >= 30)`
+- `GroupBy(x => x.Age).Where(g => g.Count() >= 2 && g.Key >= 30)`
+
+### Engine-aligned behavior notes
+
+- grouped LINQ queries still lower into a fresh native `Query`
+- grouped execution still routes through `QueryOptimization` and `GroupByPipe`
+- grouped ordering follows native engine behavior; the provider does **not** add general post-group ordering support
+- `collection.Query()` remains the escape hatch for advanced/manual grouped queries
+
+## Explicitly Unsupported / Rejected in Phase 5
+
+The provider must fail clearly for shapes that imply more than the native engine currently guarantees.
+
+### Unsupported grouped shapes
+
+- raw `IGrouping<TKey, TElement>` materialization
+- `GroupBy` overloads with:
+  - element selector
+  - result selector
+  - comparer
+- nested grouped composition such as:
+  - `g.Where(...)`
+  - `g.Select(...)`
+  - `g.ToArray()` / `g.ToList()`
+  - projecting raw grouped elements
+- array/list aggregation projections over grouped contents
+- multiple grouped projection stages
+- grouped `OrderBy` / `ThenBy`
+- nested `GroupBy`
+- grouped `AnyAsync`, `CountAsync`, and `LongCountAsync` over grouped result rows
+
+### Explicitly deferred advanced operators
+
+- `Join`
+- `GroupJoin`
+- `SelectMany`
+- set operators (`Union`, `Intersect`, `Except`)
+- nested queryable subqueries
+- any multi-source query composition
+
+## Native Builder Escape Hatch
+
+When callers need grouped shapes outside the narrow contract above, the expected path is still the native builder:
+
+- `collection.Query()`
+- direct `Query.GroupBy(...)`
+- direct `Query.Having(...)`
+- manual grouped `BsonExpression` projections
+
+This is a design goal, not a temporary workaround: the LINQ provider remains additive and intentionally narrower than the native query API.
+

@@ -192,6 +192,96 @@ public class Queryable_Execution_Tests
     }
 
     [Fact]
+    public async Task Queryable_GroupBy_Skip_Take_Parity_With_Native_Query_And_Local()
+    {
+        await using var db = await PersonGroupByData.CreateAsync();
+        var (collection, local) = db.GetData();
+
+        var queryable = collection.AsQueryable()
+            .Where(x => x.Age >= 18)
+            .GroupBy(x => x.Age)
+            .Select(g => new { Age = g.Key, Count = g.Count() })
+            .Skip(1)
+            .Take(5);
+
+        var lowered = queryable.ToQuery();
+
+        var expectedLocal = local
+            .Where(x => x.Age >= 18)
+            .GroupBy(x => x.Age)
+            .OrderBy(x => x.Key)
+            .Select(x => new { Age = x.Key, Count = x.Count() })
+            .Skip(1)
+            .Take(5)
+            .ToArray();
+
+        var expectedNative = await collection.Query()
+            .Where(x => x.Age >= 18)
+            .GroupBy(lowered.GroupBy)
+            .Select(lowered.Select)
+            .Skip(1)
+            .Limit(5)
+            .ToArray();
+
+        var actual = await queryable.ToArrayAsync();
+
+        actual.Should().Equal(expectedLocal);
+        actual.Select(x => x.Age).Should().Equal(expectedNative.Select(x => x["Age"].AsInt32));
+        actual.Select(x => x.Count).Should().Equal(expectedNative.Select(x => x["Count"].AsInt32));
+    }
+
+    [Fact]
+    public async Task Queryable_GroupBy_GetPlanAsync_Routes_Through_GroupBy_Pipe_And_Matches_Native_Query()
+    {
+        await using var db = await PersonGroupByData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        var queryable = collection.AsQueryable()
+            .Where(x => x.Age >= 18)
+            .GroupBy(x => x.Age)
+            .Where(g => g.Count() >= 2)
+            .Select(g => new { Age = g.Key, Count = g.Count() })
+            .Skip(1)
+            .Take(3);
+
+        var lowered = queryable.ToQuery();
+
+        var providerPlan = await queryable.GetPlanAsync();
+        var nativePlan = await collection.Query()
+            .Where(x => x.Age >= 18)
+            .GroupBy(lowered.GroupBy)
+            .Having(lowered.Having)
+            .Select(lowered.Select)
+            .Skip(1)
+            .Limit(3)
+            .GetPlan();
+
+        providerPlan["pipe"].Should().Be("groupByPipe");
+        providerPlan["pipe"].Should().Be(nativePlan["pipe"]);
+        providerPlan["groupBy"]["expr"].Should().Be(nativePlan["groupBy"]["expr"]);
+        providerPlan["groupBy"]["having"].Should().Be(nativePlan["groupBy"]["having"]);
+        providerPlan["groupBy"]["select"].Should().Be(nativePlan["groupBy"]["select"]);
+        providerPlan["offset"].AsInt32.Should().Be(nativePlan["offset"].AsInt32);
+        providerPlan["limit"].AsInt32.Should().Be(nativePlan["limit"].AsInt32);
+    }
+
+    [Fact]
+    public async Task Queryable_Grouped_CountAsync_Fails_Clearly()
+    {
+        await using var db = await PersonGroupByData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        var queryable = collection.AsQueryable()
+            .GroupBy(x => x.Age)
+            .Select(g => new { Age = g.Key, Count = g.Count() });
+
+        Func<Task> act = async () => _ = await queryable.CountAsync();
+
+        await act.Should().ThrowAsync<NotSupportedException>()
+            .WithMessage("*Count*grouped LINQ queries*ToListAsync*ToArrayAsync*Query()*");
+    }
+
+    [Fact]
     public async Task Queryable_Sync_Execution_Fails_Clearly()
     {
         await using var db = await PersonQueryData.CreateAsync();

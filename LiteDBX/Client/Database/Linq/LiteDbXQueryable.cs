@@ -238,6 +238,12 @@ internal static class LiteDbXQueryParser
                 source.CurrentElementType,
                 queryExpression: call),
 
+            LiteDbXQueryMethodKind.GroupBy => source.AppendOperator(
+                new LiteDbXQueryOperator(methodKind.Value, call, lambda: LiteDbXQueryExpressionHelper.GetLambda(call.Arguments[1]), resultType: LiteDbXQueryExpressionHelper.GetSequenceElementType(call.Type)),
+                LiteDbXQueryExpressionHelper.GetSequenceElementType(call.Type) ?? throw new NotSupportedException($"Unable to determine GroupBy result type for expression {call}."),
+                isGrouped: true,
+                queryExpression: call),
+
             LiteDbXQueryMethodKind.Select => source.AppendOperator(
                 new LiteDbXQueryOperator(methodKind.Value, call, lambda: LiteDbXQueryExpressionHelper.GetLambda(call.Arguments[1]), resultType: LiteDbXQueryExpressionHelper.GetSequenceElementType(call.Type)),
                 LiteDbXQueryExpressionHelper.GetSequenceElementType(call.Type) ?? throw new NotSupportedException($"Unable to determine Select result type for expression {call}."),
@@ -293,6 +299,7 @@ internal static class LiteDbXQueryParser
         return method.Name switch
         {
             nameof(Queryable.Where) => LiteDbXQueryMethodKind.Where,
+            nameof(Queryable.GroupBy) => LiteDbXQueryMethodKind.GroupBy,
             nameof(Queryable.Select) => LiteDbXQueryMethodKind.Select,
             nameof(Queryable.OrderBy) => LiteDbXQueryMethodKind.OrderBy,
             nameof(Queryable.OrderByDescending) => LiteDbXQueryMethodKind.OrderByDescending,
@@ -325,7 +332,7 @@ internal static class LiteDbXQueryParser
     {
         return new NotSupportedException(
             $"Queryable method {Reflection.MethodName(method)} is not supported by the current LiteDbX LINQ MVP scope ({expression}). " +
-            "Supported operators in this phase are Where, Select, OrderBy, OrderByDescending, ThenBy, ThenByDescending, Skip, and Take. " +
+            "Supported operators in this phase are Where, Select, OrderBy, OrderByDescending, ThenBy, ThenByDescending, Skip, Take, and a narrow GroupBy(...)-with-grouped-aggregate-projection subset. " +
             "Fall back to collection.Query() for unsupported shapes.");
     }
 
@@ -333,6 +340,17 @@ internal static class LiteDbXQueryParser
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (call == null) throw new ArgumentNullException(nameof(call));
+
+        if (methodKind == LiteDbXQueryMethodKind.GroupBy)
+        {
+            ValidateGroupByShape(source, call);
+            return;
+        }
+
+        if (source.IsGrouped)
+        {
+            ValidateGroupedContinuation(source, methodKind, call);
+        }
 
         if (source.HasProjection && methodKind != LiteDbXQueryMethodKind.Skip && methodKind != LiteDbXQueryMethodKind.Take)
         {
@@ -399,6 +417,93 @@ internal static class LiteDbXQueryParser
         }
     }
 
+    private static void ValidateGroupByShape(LiteDbXQueryState source, MethodCallExpression call)
+    {
+        if (source.IsGrouped)
+        {
+            throw UnsupportedPattern(
+                "nested GroupBy(...) composition is not supported by the LiteDbX LINQ provider",
+                call,
+                "Support is intentionally limited to a single grouped query stage that lowers directly to collection.Query().GroupBy(...).");
+        }
+
+        if (source.HasProjection)
+        {
+            throw UnsupportedPattern(
+                "GroupBy(...) after Select(...) is not supported by the LiteDbX LINQ provider",
+                call,
+                "Apply GroupBy(...) directly to the collection-root document shape, or fall back to collection.Query() for advanced grouped pipelines.");
+        }
+
+        if (source.HasAnyOrdering)
+        {
+            throw UnsupportedPattern(
+                "GroupBy(...) does not support pre-group ordering in the LiteDbX LINQ provider",
+                call,
+                "The native engine routes grouped queries through its own key-ordered group-by pipeline. Remove OrderBy(...), or use collection.Query() if you need manual grouped query composition.");
+        }
+
+        if (source.HasPaging)
+        {
+            throw UnsupportedPattern(
+                "GroupBy(...) after Skip(...) / Take(...) is not supported by the LiteDbX LINQ provider",
+                call,
+                "The native engine applies paging after grouping. Use grouped Skip(...) / Take(...) after the grouped projection, or fall back to collection.Query().");
+        }
+
+        if (call.Arguments.Count != 2)
+        {
+            throw UnsupportedPattern(
+                "Only Queryable.GroupBy(source, keySelector) is supported by the LiteDbX LINQ provider",
+                call,
+                "Element selectors, result selectors, and comparer overloads are intentionally deferred. Use collection.Query() for advanced grouped queries.");
+        }
+    }
+
+    private static void ValidateGroupedContinuation(LiteDbXQueryState source, LiteDbXQueryMethodKind methodKind, MethodCallExpression call)
+    {
+        switch (methodKind)
+        {
+            case LiteDbXQueryMethodKind.Where:
+                if (source.HasProjection)
+                {
+                    throw UnsupportedPattern(
+                        "Where(...) after a grouped Select(...) is not supported by the LiteDbX LINQ provider",
+                        call,
+                        "Use post-group filtering before Select(...) so it can lower to HAVING, or fall back to collection.Query().");
+                }
+                return;
+
+            case LiteDbXQueryMethodKind.Select:
+                return;
+
+            case LiteDbXQueryMethodKind.Skip:
+            case LiteDbXQueryMethodKind.Take:
+                return;
+
+            case LiteDbXQueryMethodKind.OrderBy:
+            case LiteDbXQueryMethodKind.OrderByDescending:
+            case LiteDbXQueryMethodKind.ThenBy:
+            case LiteDbXQueryMethodKind.ThenByDescending:
+                throw UnsupportedPattern(
+                    "Grouped LINQ queries do not support OrderBy(...) in the current LiteDbX provider",
+                    call,
+                    "The native group-by pipeline already orders by the group key when required. Keep grouped queries in engine order, or use collection.Query() for manual grouped execution.");
+
+            case LiteDbXQueryMethodKind.GroupBy:
+                throw UnsupportedPattern(
+                    "Nested GroupBy(...) composition is not supported by the LiteDbX LINQ provider",
+                    call,
+                    "Only a single grouped stage that lowers directly to Query.GroupBy is supported.");
+
+            default:
+                throw UnsupportedPattern(
+                    $"{methodKind} is not supported after GroupBy(...) in the LiteDbX LINQ provider",
+                    call,
+                    "Supported grouped continuations are limited to Where(...) for HAVING, a single grouped Select(...), and optional Skip(...) / Take(...). Fall back to collection.Query() for more advanced grouped composition.");
+        }
+    }
+
     private static NotSupportedException UnsupportedPattern(string pattern, Expression expression, string guidance)
     {
         return new NotSupportedException(
@@ -412,7 +517,10 @@ internal static class LiteDbXQueryLowerer
     {
         if (state == null) throw new ArgumentNullException(nameof(state));
 
+        ValidateLoweringShape(state);
+
         var query = new Query();
+        var groupByDefined = false;
 
         foreach (var include in state.Root.Includes)
         {
@@ -424,11 +532,26 @@ internal static class LiteDbXQueryLowerer
             switch (operation.Kind)
             {
                 case LiteDbXQueryMethodKind.Where:
-                    query.Where.Add(LiteDbXLambdaTranslator.Translate(state.Root.Mapper, operation.Lambda));
+                    if (groupByDefined)
+                    {
+                        var having = LiteDbXGroupedQueryTranslator.TranslateHaving(state.Root.Mapper, operation.Lambda);
+                        query.Having = query.Having == null ? having : Query.And(query.Having, having);
+                    }
+                    else
+                    {
+                        query.Where.Add(LiteDbXLambdaTranslator.Translate(state.Root.Mapper, operation.Lambda));
+                    }
+                    break;
+
+                case LiteDbXQueryMethodKind.GroupBy:
+                    query.GroupBy = LiteDbXLambdaTranslator.Translate(state.Root.Mapper, operation.Lambda);
+                    groupByDefined = true;
                     break;
 
                 case LiteDbXQueryMethodKind.Select:
-                    query.Select = LiteDbXLambdaTranslator.Translate(state.Root.Mapper, operation.Lambda);
+                    query.Select = groupByDefined
+                        ? LiteDbXGroupedQueryTranslator.TranslateSelect(state.Root.Mapper, operation.Lambda)
+                        : LiteDbXLambdaTranslator.Translate(state.Root.Mapper, operation.Lambda);
                     break;
 
                 case LiteDbXQueryMethodKind.OrderBy:
@@ -471,6 +594,31 @@ internal static class LiteDbXQueryLowerer
         }
 
         return query;
+    }
+
+    private static void ValidateLoweringShape(LiteDbXQueryState state)
+    {
+        if (!state.IsGrouped)
+        {
+            return;
+        }
+
+        if (!state.HasProjection)
+        {
+            throw new NotSupportedException(
+                $"Raw GroupBy(...) materialization is not supported by the LiteDbX LINQ provider ({state.QueryExpression}). " +
+                "Support is intentionally limited to grouped aggregate projections such as GroupBy(...).Select(g => new { g.Key, Count = g.Count() }). " +
+                "Use collection.Query() for advanced/manual grouped queries.");
+        }
+
+        if (state.TerminalKind == LiteDbXQueryTerminalKind.Any ||
+            state.TerminalKind == LiteDbXQueryTerminalKind.Count ||
+            state.TerminalKind == LiteDbXQueryTerminalKind.LongCount)
+        {
+            throw new NotSupportedException(
+                $"{state.TerminalKind} over grouped LINQ queries is not supported by the current LiteDbX provider ({state.QueryExpression}). " +
+                "The native Count/Any helpers aggregate source documents rather than grouped result rows. Materialize the grouped projection with ToListAsync()/ToArrayAsync(), or use collection.Query() for manual grouped execution.");
+        }
     }
 }
 
