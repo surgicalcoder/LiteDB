@@ -129,8 +129,8 @@ public class Queryable_Translation_Tests
 
         var actual = await queryable.ToNativeQueryable().ToArray();
 
-        actual.Should().Equal(expectedNative);
-        actual.Should().Equal(expectedLocal);
+        actual.Should().BeEquivalentTo(expectedNative, options => options.WithStrictOrdering());
+        actual.Should().BeEquivalentTo(expectedLocal, options => options.WithStrictOrdering());
     }
 
     [Fact]
