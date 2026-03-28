@@ -140,6 +140,145 @@ public class InheritedMemberConventions_Tests
     }
 
     [Fact]
+    public async Task FindById_Uses_Inherited_Id_Storage_Conversion_And_Accepts_Storage_Value()
+    {
+        var mapper = CreateMapper(autoId: false);
+        var objectId = ObjectId.NewObjectId();
+
+        await using var db = new LiteDatabase(":memory:", mapper);
+        var col = db.GetCollection<Customer>("customers");
+
+        var entity = new Customer
+        {
+            Id = objectId.ToString(),
+            Name = "John",
+            PartitionKey = "north"
+        };
+
+        await col.Insert(entity);
+
+        var loadedByStringId = await col.FindById(entity.Id);
+        var loadedByObjectId = await col.FindById(objectId);
+        var loadedByPredicate = await col.FindOne(x => x.Id == entity.Id);
+
+        loadedByStringId.Should().NotBeNull();
+        loadedByStringId!.Id.Should().Be(entity.Id);
+        loadedByObjectId.Should().NotBeNull();
+        loadedByObjectId!.Id.Should().Be(entity.Id);
+        loadedByPredicate.Should().NotBeNull();
+        loadedByPredicate!.Id.Should().Be(entity.Id);
+    }
+
+    [Fact]
+    public async Task Delete_Uses_Inherited_Id_Storage_Conversion()
+    {
+        var mapper = CreateMapper(autoId: false);
+        var objectId = ObjectId.NewObjectId();
+
+        await using var db = new LiteDatabase(":memory:", mapper);
+        var col = db.GetCollection<Customer>("customers");
+
+        await col.Insert(new Customer
+        {
+            Id = objectId.ToString(),
+            Name = "John",
+            PartitionKey = "north"
+        });
+
+        (await col.Delete(objectId.ToString())).Should().BeTrue();
+        (await col.FindById(objectId.ToString())).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Repository_SingleById_Uses_Inherited_Id_Storage_Conversion()
+    {
+        var mapper = CreateMapper(autoId: false);
+        var objectId = ObjectId.NewObjectId();
+
+        await using var repo = new LiteRepository(":memory:", mapper);
+
+        await repo.Insert(new Customer
+        {
+            Id = objectId.ToString(),
+            Name = "John",
+            PartitionKey = "north"
+        }, "customers");
+
+        var loaded = await repo.SingleById<Customer>(objectId.ToString(), "customers");
+
+        loaded.Should().NotBeNull();
+        loaded.Id.Should().Be(objectId.ToString());
+    }
+
+    [Fact]
+    public async Task Explicit_Id_Operations_Use_Inherited_Id_Storage_Conversion()
+    {
+        var mapper = CreateMapper(autoId: false);
+        var insertedId = ObjectId.NewObjectId();
+        var upsertedId = ObjectId.NewObjectId();
+
+        await using var db = new LiteDatabase(":memory:", mapper);
+        var col = db.GetCollection<Customer>("customers");
+
+        await col.Insert(insertedId.ToString(), new Customer
+        {
+            Name = "John",
+            PartitionKey = "north"
+        });
+
+        (await col.FindById(insertedId.ToString()))!.Name.Should().Be("John");
+
+        (await col.Update(insertedId.ToString(), new Customer
+        {
+            Id = insertedId.ToString(),
+            Name = "Jane",
+            PartitionKey = "north"
+        })).Should().BeTrue();
+
+        (await col.FindById(insertedId.ToString()))!.Name.Should().Be("Jane");
+
+        (await col.Upsert(upsertedId.ToString(), new Customer
+        {
+            Name = "Mary",
+            PartitionKey = "west"
+        })).Should().BeTrue();
+
+        var upserted = await col.FindById(upsertedId.ToString());
+
+        upserted.Should().NotBeNull();
+        upserted!.Name.Should().Be("Mary");
+        upserted.PartitionKey.Should().Be("west");
+    }
+
+    [Fact]
+    public async Task Invalid_ObjectId_String_Throws_On_FindById_When_Inherited_Id_Stored_As_ObjectId()
+    {
+        var mapper = CreateMapper(autoId: false);
+
+        await using var db = new LiteDatabase(":memory:", mapper);
+        var col = db.GetCollection<Customer>("customers");
+
+        var act = async () => await col.FindById("not-an-object-id");
+
+        await act.Should().ThrowAsync<LiteException>();
+    }
+
+    [Fact]
+    public async Task FindById_Does_Not_Change_Plain_String_Id_Collections()
+    {
+        await using var db = new LiteDatabase(":memory:");
+        var col = db.GetCollection<UnrelatedEntity>("unrelated");
+
+        await col.Insert(new UnrelatedEntity { Id = "plain-id", Name = "Other" });
+
+        var loaded = await col.FindById("plain-id");
+
+        loaded.Should().NotBeNull();
+        loaded!.Id.Should().Be("plain-id");
+        loaded.Name.Should().Be("Other");
+    }
+
+    [Fact]
     public async Task Invalid_ObjectId_String_Throws_On_Insert()
     {
         var mapper = CreateMapper();
@@ -157,12 +296,12 @@ public class InheritedMemberConventions_Tests
         await act.Should().ThrowAsync<LiteException>();
     }
 
-    private static BsonMapper CreateMapper()
+    private static BsonMapper CreateMapper(bool autoId = true)
     {
         var mapper = new BsonMapper();
 
         mapper.Inheritance<EntityBase>()
-            .Id(x => x.Id, BsonType.ObjectId, autoId: true)
+            .Id(x => x.Id, BsonType.ObjectId, autoId: autoId)
             .Ignore(x => x.IgnoredA)
             .Ignore(x => x.IgnoredB)
             .Serialize(

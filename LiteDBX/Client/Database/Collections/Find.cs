@@ -99,10 +99,10 @@ public partial class LiteCollection<T>
     /// <summary>Find a single document by its <c>_id</c>. Returns <c>null</c> if not found.</summary>
     public ValueTask<T> FindById(BsonValue id, CancellationToken cancellationToken = default)
     {
-        if (id == null || id.IsNull) throw new ArgumentNullException(nameof(id));
+        var normalizedId = NormalizeId(id);
 
         return Query()
-            .Where(BsonExpression.Create("_id = @0", id))
+            .Where(BsonExpression.Create("_id = @0", normalizedId))
             .FirstOrDefault(cancellationToken);
     }
 

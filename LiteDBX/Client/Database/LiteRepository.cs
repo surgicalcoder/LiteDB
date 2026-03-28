@@ -132,7 +132,12 @@ public class LiteRepository : ILiteRepository
 
     /// <inheritdoc/>
     public ValueTask<T> SingleById<T>(BsonValue id, string collectionName = null, CancellationToken cancellationToken = default)
-        => Query<T>(collectionName).Where("_id = @0", id).Single(cancellationToken);
+    {
+        var collection = (LiteCollection<T>)Database.GetCollection<T>(collectionName);
+        var normalizedId = collection.NormalizeId(id);
+
+        return collection.Query().Where("_id = @0", new[] { normalizedId }).Single(cancellationToken);
+    }
 
     /// <inheritdoc/>
     public ValueTask<List<T>> Fetch<T>(BsonExpression predicate, string collectionName = null, CancellationToken cancellationToken = default)

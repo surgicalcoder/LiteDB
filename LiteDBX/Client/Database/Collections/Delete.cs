@@ -13,12 +13,9 @@ public partial class LiteCollection<T>
     /// </summary>
     public async ValueTask<bool> Delete(BsonValue id, CancellationToken cancellationToken = default)
     {
-        if (id == null || id.IsNull)
-        {
-            throw new ArgumentNullException(nameof(id));
-        }
+        var normalizedId = NormalizeId(id);
 
-        return await _engine.Delete(Name, new[] { id }, cancellationToken).ConfigureAwait(false) == 1;
+        return await _engine.Delete(Name, new[] { normalizedId }, cancellationToken).ConfigureAwait(false) == 1;
     }
 
     /// <summary>

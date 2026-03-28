@@ -56,14 +56,11 @@ public partial class LiteCollection<T>
             throw new ArgumentNullException(nameof(entity));
         }
 
-        if (id == null || id.IsNull)
-        {
-            throw new ArgumentNullException(nameof(id));
-        }
+        var normalizedId = NormalizeId(id);
 
         var doc = _mapper.ToDocument(entity);
 
-        doc["_id"] = id;
+        doc["_id"] = normalizedId;
 
         await _engine.Insert(Name, new[] { doc }, AutoId, transaction, cancellationToken).ConfigureAwait(false);
     }

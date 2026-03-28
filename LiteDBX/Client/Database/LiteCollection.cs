@@ -63,6 +63,21 @@ public sealed partial class LiteCollection<T> : ILiteCollection<T>
     /// </summary>
     public EntityMapper EntityMapper { get; }
 
+    internal BsonValue NormalizeId(BsonValue id)
+    {
+        if (id == null || id.IsNull)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        if (_id == null || !_mapper.RequiresMemberAwareSerialization(_id))
+        {
+            return id;
+        }
+
+        return _mapper.SerializeMemberValue(_id, id.RawValue, 0);
+    }
+
     private string GetFieldExpression<K>(Expression<Func<T, K>> field)
     {
         if (field == null)

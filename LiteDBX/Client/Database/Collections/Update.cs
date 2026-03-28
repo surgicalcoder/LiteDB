@@ -35,16 +35,13 @@ public partial class LiteCollection<T>
             throw new ArgumentNullException(nameof(entity));
         }
 
-        if (id == null || id.IsNull)
-        {
-            throw new ArgumentNullException(nameof(id));
-        }
+        var normalizedId = NormalizeId(id);
 
         // get BsonDocument from object
         var doc = _mapper.ToDocument(entity);
 
         // set document _id using id parameter
-        doc["_id"] = id;
+        doc["_id"] = normalizedId;
 
         return await _engine.Update(Name, [doc], cancellationToken).ConfigureAwait(false) > 0;
     }
