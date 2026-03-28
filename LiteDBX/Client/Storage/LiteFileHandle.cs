@@ -84,6 +84,9 @@ internal sealed class LiteFileHandle<TFileId> : ILiteFileHandle<TFileId>
         if (canWrite)
         {
             _writeBuffer = new MemoryStream(MaxChunkSize);
+            // Opening a write handle changes the persisted file state even before any payload bytes are written:
+            // empty uploads, zero-byte overwrites, and metadata-only overwrites must still upsert the _files row.
+            _writeStateDirty = true;
         }
     }
 

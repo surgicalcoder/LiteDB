@@ -150,7 +150,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(Query.Near(GetFieldExpression(field), center, radiusMeters), skip, limit, cancellationToken);
+        return Find(global::LiteDbX.Query.Near(GetFieldExpression(field), center, radiusMeters), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindWithinBoundingBox(
@@ -163,7 +163,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(Query.WithinBoundingBox(GetFieldExpression(field), minLat, minLon, maxLat, maxLon), skip, limit, cancellationToken);
+        return Find(global::LiteDbX.Query.WithinBoundingBox(GetFieldExpression(field), minLat, minLon, maxLat, maxLon), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindWithin(
@@ -173,7 +173,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(Query.Within(GetFieldExpression(field), polygon), skip, limit, cancellationToken);
+        return Find(global::LiteDbX.Query.Within(GetFieldExpression(field), polygon), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindIntersects(
@@ -183,7 +183,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(Query.Intersects(GetFieldExpression(field), shape), skip, limit, cancellationToken);
+        return Find(global::LiteDbX.Query.Intersects(GetFieldExpression(field), shape), skip, limit, cancellationToken);
     }
 
     public IAsyncEnumerable<T> FindContainsPoint(
@@ -193,7 +193,7 @@ public partial class LiteCollection<T>
         int limit = int.MaxValue,
         CancellationToken cancellationToken = default)
     {
-        return Find(Query.ContainsPoint(GetFieldExpression(field), point), skip, limit, cancellationToken);
+        return Find(global::LiteDbX.Query.ContainsPoint(GetFieldExpression(field), point), skip, limit, cancellationToken);
     }
 
     #endregion

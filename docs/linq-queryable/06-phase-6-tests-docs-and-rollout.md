@@ -153,6 +153,8 @@ The provider layer must have dedicated tests for:
 5. grouped translation only within the engine-supported subset
 6. transaction-aware query root binding via `AsQueryable(ILiteTransaction)`
 
+Collection roots are the design anchor for provider-backed LINQ. `LiteRepository` intentionally remains centered on native `Query<T>()` convenience and is **not** a repository-wide LINQ entrypoint in the current rollout.
+
 ## Manual Validation Focus
 
 Phase 6 validation should stay focused and incremental.
@@ -256,6 +258,7 @@ These remain deferred and must stay documented as such:
 - publish `AsQueryable()` documentation
 - document async-only terminal usage prominently
 - keep `Query()` examples first-class in README/docs
+- document that LINQ starts from `ILiteCollection<T>.AsQueryable()`, not `LiteRepository`
 - present grouped LINQ as limited/engine-aligned
 
 ### Stage 2 — production hardening

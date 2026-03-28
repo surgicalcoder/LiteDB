@@ -81,6 +81,30 @@ public class Storage_Tests
         md!.Metadata["y"].AsInt32.Should().Be(99);
     }
 
+    [Fact]
+    public async Task Storage_Empty_Upload_Persists_Metadata_And_Can_Be_Found()
+    {
+        using var f = new TempFile();
+        await using var db = new LiteDatabase(f.Filename);
+        var fs = db.GetStorage<string>("myFiles", "myChunks");
+
+        await fs.Upload("photos/2014/picture-01.jpg", "picture-01.jpg", new MemoryStream());
+
+        var file = await fs.FindById("photos/2014/picture-01.jpg");
+        file.Should().NotBeNull();
+        file!.Length.Should().Be(0);
+        file.Chunks.Should().Be(0);
+
+        var files = new System.Collections.Generic.List<LiteFileInfo<string>>();
+        await foreach (var item in fs.Find("_id LIKE 'photos/2014/%'"))
+        {
+            files.Add(item);
+        }
+
+        files.Should().ContainSingle();
+        files[0].Id.Should().Be("photos/2014/picture-01.jpg");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static string HashBytes(byte[] input)

@@ -167,6 +167,9 @@ Use `AsQueryable()` when you want supported single-source LINQ composition over 
 
 ### Starting a LINQ query
 
+Provider-backed LINQ starts from a collection root via `ILiteCollection<T>.AsQueryable()`.
+It does not currently start from `LiteRepository`; repository convenience remains centered on the native `Query<T>()` path.
+
 ```csharp
 var rows = await customers
     .AsQueryable()
@@ -281,6 +284,7 @@ var plan = await customers
 ### Rollout / support guidance
 
 - `Query()` remains the primary native query API
+- `LiteRepository` remains centered on native `Query<T>()`; repository-level LINQ convenience is intentionally deferred
 - `AsQueryable()` is additive and production-oriented for the documented supported subset
 - grouped LINQ should be understood as a conservative subset, not full `IGrouping<TKey, TElement>` parity
 - unsupported LINQ patterns are expected to fail clearly and point callers back to `Query()`
