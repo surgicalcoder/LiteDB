@@ -1,0 +1,212 @@
+﻿using System;
+using System.Linq;
+using System.Threading.Tasks;
+using FluentAssertions;
+using Xunit;
+
+namespace LiteDbX.Tests.QueryTest;
+
+public class Queryable_Execution_Tests
+{
+    [Fact]
+    public async Task Queryable_ToListAsync_Parity_With_Native_Query()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, local) = db.GetData();
+
+        var queryable = collection.AsQueryable()
+            .Where(x => x.Age >= 18)
+            .OrderBy(x => x.Name)
+            .Select(x => new { x.Id, x.Name });
+
+        var expectedNative = await collection.Query()
+            .Where(x => x.Age >= 18)
+            .OrderBy(x => x.Name)
+            .Select(x => new { x.Id, x.Name })
+            .ToList();
+
+        var expectedLocal = local
+            .Where(x => x.Age >= 18)
+            .OrderBy(x => x.Name)
+            .Select(x => new { x.Id, x.Name })
+            .ToList();
+
+        var actual = await queryable.ToListAsync();
+
+        actual.Should().Equal(expectedNative);
+        actual.Should().Equal(expectedLocal);
+    }
+
+    [Fact]
+    public async Task Queryable_ToArrayAsync_Parity_With_Native_Query()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, local) = db.GetData();
+
+        var queryable = collection.AsQueryable()
+            .Where(x => x.Address.State == "FL")
+            .OrderByDescending(x => x.Age)
+            .ThenBy(x => x.Name)
+            .Select(x => x.Address.City)
+            .Take(15);
+
+        var expectedNative = await collection.Query()
+            .Where(x => x.Address.State == "FL")
+            .OrderByDescending(x => x.Age)
+            .ThenBy(x => x.Name)
+            .Select(x => x.Address.City)
+            .Limit(15)
+            .ToArray();
+
+        var expectedLocal = local
+            .Where(x => x.Address.State == "FL")
+            .OrderByDescending(x => x.Age)
+            .ThenBy(x => x.Name)
+            .Select(x => x.Address.City)
+            .Take(15)
+            .ToArray();
+
+        var actual = await queryable.ToArrayAsync();
+
+        actual.Should().Equal(expectedNative);
+        actual.Should().Equal(expectedLocal);
+    }
+
+    [Fact]
+    public async Task Queryable_FirstAsync_And_FirstOrDefaultAsync_Parity_With_Native_Query()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        var firstQuery = collection.AsQueryable()
+            .Where(x => x.Age >= 18)
+            .OrderBy(x => x.Name)
+            .Select(x => new { x.Id, x.Name });
+
+        var expectedFirst = await collection.Query()
+            .Where(x => x.Age >= 18)
+            .OrderBy(x => x.Name)
+            .Select(x => new { x.Id, x.Name })
+            .First();
+
+        var actualFirst = await firstQuery.FirstAsync();
+        actualFirst.Should().BeEquivalentTo(expectedFirst);
+
+        var emptyQuery = collection.AsQueryable()
+            .Where(x => x.Id < 0)
+            .Select(x => x.Name);
+
+        var expectedEmpty = await collection.Query()
+            .Where(x => x.Id < 0)
+            .Select(x => x.Name)
+            .FirstOrDefault();
+
+        var actualEmpty = await emptyQuery.FirstOrDefaultAsync();
+        actualEmpty.Should().Be(expectedEmpty);
+    }
+
+    [Fact]
+    public async Task Queryable_SingleAsync_And_SingleOrDefaultAsync_Parity_With_Native_Query()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        var singleQuery = collection.AsQueryable()
+            .Where(x => x.Id == 1)
+            .Select(x => x.Name);
+
+        var expectedSingle = await collection.Query()
+            .Where(x => x.Id == 1)
+            .Select(x => x.Name)
+            .Single();
+
+        var actualSingle = await singleQuery.SingleAsync();
+        actualSingle.Should().Be(expectedSingle);
+
+        var noneQuery = collection.AsQueryable()
+            .Where(x => x.Id < 0)
+            .Select(x => x.Name);
+
+        var expectedNone = await collection.Query()
+            .Where(x => x.Id < 0)
+            .Select(x => x.Name)
+            .SingleOrDefault();
+
+        var actualNone = await noneQuery.SingleOrDefaultAsync();
+        actualNone.Should().Be(expectedNone);
+    }
+
+    [Fact]
+    public async Task Queryable_Any_Count_LongCount_Async_Parity_With_Native_Query()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, local) = db.GetData();
+
+        var queryable = collection.AsQueryable().Where(x => x.Age >= 30);
+
+        var expectedAny = await collection.Query().Where(x => x.Age >= 30).Exists();
+        var expectedCount = await collection.Query().Where(x => x.Age >= 30).Count();
+        var expectedLongCount = await collection.Query().Where(x => x.Age >= 30).LongCount();
+
+        var actualAny = await queryable.AnyAsync();
+        var actualCount = await queryable.CountAsync();
+        var actualLongCount = await queryable.LongCountAsync();
+
+        actualAny.Should().Be(expectedAny);
+        actualCount.Should().Be(expectedCount);
+        actualLongCount.Should().Be(expectedLongCount);
+
+        actualCount.Should().Be(local.Count(x => x.Age >= 30));
+        actualLongCount.Should().Be(local.LongCount(x => x.Age >= 30));
+    }
+
+    [Fact]
+    public async Task Queryable_GetPlanAsync_Parity_With_Native_Query()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        await collection.EnsureIndex(x => x.Age);
+
+        var queryable = collection.AsQueryable()
+            .Where(x => x.Age >= 30)
+            .OrderBy(x => x.Age)
+            .ThenByDescending(x => x.Name)
+            .Select(x => new { x.Age, x.Name })
+            .Take(10);
+
+        var providerPlan = await queryable.GetPlanAsync();
+        var nativePlan = await collection.Query()
+            .Where(x => x.Age >= 30)
+            .OrderBy(x => x.Age)
+            .ThenByDescending(x => x.Name)
+            .Select(x => new { x.Age, x.Name })
+            .Limit(10)
+            .GetPlan();
+
+        providerPlan["pipe"].Should().Be(nativePlan["pipe"]);
+        providerPlan["select"]["expr"].AsString.Should().Be(nativePlan["select"]["expr"].AsString);
+        providerPlan["orderBy"].AsArray.Count.Should().Be(nativePlan["orderBy"].AsArray.Count);
+        providerPlan["limit"].AsInt32.Should().Be(nativePlan["limit"].AsInt32);
+        providerPlan["index"]["expr"].Should().Be(nativePlan["index"]["expr"]);
+    }
+
+    [Fact]
+    public async Task Queryable_Sync_Execution_Fails_Clearly()
+    {
+        await using var db = await PersonQueryData.CreateAsync();
+        var (collection, _) = db.GetData();
+
+        var queryable = collection.AsQueryable().Where(x => x.Age >= 18);
+
+        Action enumerate = () => _ = queryable.ToList();
+        Action count = () => _ = queryable.Count();
+
+        enumerate.Should().Throw<NotSupportedException>()
+            .WithMessage("*async queryable terminals*collection.Query()*");
+
+        count.Should().Throw<NotSupportedException>()
+            .WithMessage("*async queryable terminals*collection.Query()*");
+    }
+}
+

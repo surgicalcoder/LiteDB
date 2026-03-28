@@ -99,6 +99,49 @@ There is a documented way to inspect or debug provider-translated queries, even 
 - documented escape hatches
 - query-plan/debugging story
 
+## Phase 4 Implementation Notes
+
+The preferred Phase 4 implementation is a thin async extension surface over provider-backed `IQueryable<T>` queries:
+
+- `ToListAsync`
+- `ToArrayAsync`
+- `FirstAsync`
+- `FirstOrDefaultAsync`
+- `SingleAsync`
+- `SingleOrDefaultAsync`
+- `AnyAsync`
+- `CountAsync`
+- `LongCountAsync`
+- `GetPlanAsync`
+
+Each terminal should:
+
+1. require a LiteDbX provider-backed `IQueryable<T>`
+2. translate the expression tree into normalized provider state
+3. lower that state into a fresh native `Query`
+4. construct a native `LiteQueryable<T>` over that `Query`
+5. delegate to the existing async terminal on `LiteQueryable<T>`
+
+This preserves the canonical execution path:
+
+`IQueryable<T>`
+→ provider translation/state
+→ fresh native `Query`
+→ native `LiteQueryable<T>`
+→ engine `QueryOptimization` / `QueryPlan` / `QueryExecutor` / `QueryPipe`
+
+### Explain-plan/debug visibility
+
+Provider-backed queries should keep plan visibility by offering an async explain-plan entrypoint such as `GetPlanAsync()`, which delegates to native `GetPlan()` after lowering.
+
+Internal debug helpers such as “provider state → native `Query`” inspection are also acceptable in this phase as long as they do not become a replacement execution stack.
+
+### Escape-hatch rule
+
+`collection.Query()` remains the primary advanced/native escape hatch.
+
+The provider-backed async terminals are for supported LINQ shapes only. When a query shape falls outside the LINQ MVP, the implementation should fail clearly and direct users back to `Query()`.
+
 ## Validation
 
 - ensure async terminals map cleanly to existing `ILiteQueryableResult<T>` behavior

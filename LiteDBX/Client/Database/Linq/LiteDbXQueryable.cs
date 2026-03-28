@@ -108,6 +108,22 @@ internal sealed class LiteDbXQueryProvider : IQueryProvider
         return LiteDbXQueryLowerer.Lower(state ?? throw new ArgumentNullException(nameof(state)));
     }
 
+    internal LiteQueryable<TElement> LowerToNativeQueryable<TElement>(Expression expression)
+    {
+        if (expression == null) throw new ArgumentNullException(nameof(expression));
+
+        return LowerToNativeQueryable<TElement>(Translate(expression));
+    }
+
+    internal LiteQueryable<TElement> LowerToNativeQueryable<TElement>(LiteDbXQueryState state)
+    {
+        if (state == null) throw new ArgumentNullException(nameof(state));
+
+        var query = LowerToQuery(state);
+
+        return new LiteQueryable<TElement>(state.Root.Engine, state.Root.Mapper, state.Root.CollectionName, query, state.Root.Transaction);
+    }
+
     internal static NotSupportedException CreateSyncExecutionException(LiteDbXQueryState state)
     {
         var operation = state == null || state.TerminalKind == LiteDbXQueryTerminalKind.None
