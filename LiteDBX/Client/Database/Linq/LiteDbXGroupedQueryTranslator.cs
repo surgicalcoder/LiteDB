@@ -9,6 +9,28 @@ namespace LiteDbX;
 
 internal static class LiteDbXGroupedQueryTranslator
 {
+    private static readonly MethodInfo EnumerableSelectMethod = typeof(Enumerable)
+        .GetMethods(BindingFlags.Public | BindingFlags.Static)
+        .Where(x => x.Name == nameof(Enumerable.Select))
+        .Where(x => x.IsGenericMethodDefinition)
+        .Single(x =>
+        {
+            var parameters = x.GetParameters();
+            if (parameters.Length != 2)
+            {
+                return false;
+            }
+
+            var selectorType = parameters[1].ParameterType;
+            if (!selectorType.IsGenericType)
+            {
+                return false;
+            }
+
+            var genericArguments = selectorType.GetGenericArguments();
+            return selectorType.GetGenericTypeDefinition() == typeof(Func<,>) && genericArguments.Length == 2;
+        });
+
     private static readonly HashSet<string> SupportedAggregateMethods = new(StringComparer.Ordinal)
     {
         nameof(Enumerable.Count),
@@ -48,7 +70,7 @@ internal static class LiteDbXGroupedQueryTranslator
                 return GroupedFragment.Raw("@key");
 
             case MethodCallExpression call when IsSupportedAggregate(call, context.GroupParameter):
-                return TranslateViaMapper(context, call);
+                return TranslateAggregate(context, call);
 
             case UnaryExpression unary when unary.NodeType == ExpressionType.Convert || unary.NodeType == ExpressionType.ConvertChecked:
                 return TranslateProjection(context, unary.Operand, isTopLevel);
@@ -95,7 +117,7 @@ internal static class LiteDbXGroupedQueryTranslator
                 return GroupedFragment.Raw("@key");
 
             case MethodCallExpression call when IsSupportedAggregate(call, context.GroupParameter):
-                return TranslateViaMapper(context, call);
+                return TranslateAggregate(context, call);
         }
 
         if (!ContainsParameter(expression, context.GroupParameter))
@@ -208,6 +230,70 @@ internal static class LiteDbXGroupedQueryTranslator
         var lambda = Expression.Lambda(expression, context.GroupParameter);
         var translated = LiteDbXLambdaTranslator.Translate(context.Mapper, lambda);
         return GroupedFragment.FromExpression(translated);
+    }
+
+    private static GroupedFragment TranslateAggregate(GroupedTranslationContext context, MethodCallExpression expression)
+    {
+        var groupingType = context.GroupParameter.Type;
+        var groupingInterface = groupingType.IsGenericType && groupingType.GetGenericTypeDefinition() == typeof(IGrouping<,>)
+            ? groupingType
+            : groupingType.GetInterfaces().First(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IGrouping<,>));
+
+        var elementType = groupingInterface.GetGenericArguments()[1];
+        var sourceParameter = Expression.Parameter(typeof(IEnumerable<>).MakeGenericType(elementType), "source");
+
+        if (expression.Arguments.Count == 1)
+        {
+            return GroupedFragment.Raw($"{GetAggregateFunctionName(expression.Method.Name)}(*)");
+        }
+
+        var selector = LiteDbXQueryExpressionHelper.StripQuotes(expression.Arguments[1]);
+        if (selector is not LambdaExpression selectorLambda)
+        {
+            throw UnsupportedGroupedShape(
+                "Grouped aggregate selectors must be lambda expressions",
+                expression,
+                "Use direct grouped aggregate selectors such as g.Sum(x => x.Age), or fall back to collection.Query().");
+        }
+
+        var selectCall = Expression.Call(
+            EnumerableSelectMethod.MakeGenericMethod(elementType, selectorLambda.ReturnType),
+            sourceParameter,
+            selectorLambda);
+
+        var mapLambda = Expression.Lambda(selectCall, sourceParameter);
+        var translatedMap = LiteDbXLambdaTranslator.Translate(context.Mapper, mapLambda);
+        var mapSource = RewriteEnumerableMapToSourceToken(translatedMap.Source);
+
+        return GroupedFragment.Composite(
+            $"{GetAggregateFunctionName(expression.Method.Name)}({mapSource})",
+            translatedMap.Parameters ?? new BsonDocument());
+    }
+
+    private static string RewriteEnumerableMapToSourceToken(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return source;
+        }
+
+        return source
+            .Replace("MAP($ => ", "MAP(*=>")
+            .Replace("MAP($ =>", "MAP(*=>")
+            .Replace("MAP($=>", "MAP(*=>");
+    }
+
+    private static string GetAggregateFunctionName(string methodName)
+    {
+        return methodName switch
+        {
+            nameof(Enumerable.Count) => "COUNT",
+            nameof(Enumerable.Sum) => "SUM",
+            nameof(Enumerable.Min) => "MIN",
+            nameof(Enumerable.Max) => "MAX",
+            nameof(Enumerable.Average) => "AVG",
+            _ => throw new NotSupportedException($"Grouped aggregate {methodName} is not supported by the LiteDbX LINQ provider.")
+        };
     }
 
     private static string ResolveProjectionFieldName(BsonMapper mapper, Type resultType, MemberInfo member)
