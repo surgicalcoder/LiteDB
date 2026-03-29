@@ -428,7 +428,7 @@ internal class DiskService : IDisposable, IAsyncDisposable
             using (var stream = _dataFactory.GetStream(true, true))
             {
                 var buf = _bufferPool.Rent(PAGE_SIZE);
-                stream.Read(buf, 0, PAGE_SIZE);
+                _ = stream.Read(buf, 0, PAGE_SIZE);
                 buf[HeaderPage.P_INVALID_DATAFILE_STATE] = 1;
                 stream.Position = 0;
                 stream.Write(buf, 0, PAGE_SIZE);
@@ -447,12 +447,12 @@ internal class DiskService : IDisposable, IAsyncDisposable
         try
         {
             // Regular using: stream disposal is synchronous; only the read/write calls are async.
-            using var stream = _dataFactory.GetStream(true, true);
+            using var stream = await _dataFactory.GetStreamAsync(true, true, cancellationToken);
 
             var buf = _bufferPool.Rent(PAGE_SIZE);
             try
             {
-                await stream.ReadAsync(buf, 0, PAGE_SIZE, cancellationToken).ConfigureAwait(false);
+                _ = await stream.ReadAsync(buf, 0, PAGE_SIZE, cancellationToken).ConfigureAwait(false);
                 buf[HeaderPage.P_INVALID_DATAFILE_STATE] = 1;
                 stream.Position = 0;
                 await stream.WriteAsync(buf, 0, PAGE_SIZE, cancellationToken).ConfigureAwait(false);

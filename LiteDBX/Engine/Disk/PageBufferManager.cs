@@ -132,32 +132,18 @@ internal sealed class PageBufferManager
         }
     }
 
-    internal readonly struct SegmentCandidate
+    internal readonly struct SegmentCandidate(int segmentId, int totalPages)
     {
-        public SegmentCandidate(int segmentId, int totalPages)
-        {
-            SegmentId = segmentId;
-            TotalPages = totalPages;
-        }
-
-        public int SegmentId { get; }
-        public int TotalPages { get; }
+        public int SegmentId { get; } = segmentId;
+        public int TotalPages { get; } = totalPages;
     }
 
-    private sealed class SegmentInfo
+    private sealed class SegmentInfo(int segmentId, int totalPages)
     {
-        public SegmentInfo(int segmentId, int totalPages)
-        {
-            SegmentId = segmentId;
-            TotalPages = totalPages;
-            FreePages = totalPages;
-            LastFreeTicks = 0;
-        }
-
-        public int SegmentId { get; }
-        public int TotalPages { get; }
-        public int FreePages { get; set; }
-        public long LastFreeTicks { get; set; }
+        public int SegmentId { get; } = segmentId;
+        public int TotalPages { get; } = totalPages;
+        public int FreePages { get; set; } = totalPages;
+        public long LastFreeTicks { get; set; } = 0;
     }
 }
 
