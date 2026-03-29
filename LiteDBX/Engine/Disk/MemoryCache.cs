@@ -458,7 +458,7 @@ internal class MemoryCache : IDisposable
     /// <summary>
     /// Return how many pages are in use when call this method (ShareCounter != 0).
     /// </summary>
-    public int PagesInUse => _readable.Values.Where(x => x.ShareCounter != 0).Count();
+    public int PagesInUse => _readable.Values.Count(x => x.ShareCounter != 0);
 
     /// <summary>
     /// Return how many pages are available (completely free)
@@ -606,7 +606,7 @@ internal class MemoryCache : IDisposable
                 pages.Count == candidate.TotalPages &&
                 _bufferManager.TryRetireSegment(candidate.SegmentId))
             {
-                LOG($"retiring idle cache segment {candidate.SegmentId} ({candidate.TotalPages} pages)", "CACHE");
+                LOG($"Retiring idle cache segment {candidate.SegmentId} ({candidate.TotalPages} pages)", "CACHE");
                 continue;
             }
 
