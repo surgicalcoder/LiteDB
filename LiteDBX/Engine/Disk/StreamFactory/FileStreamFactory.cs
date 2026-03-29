@@ -13,27 +13,13 @@ namespace LiteDbX.Engine;
 /// <see cref="Stream.ReadAsync"/> / <see cref="Stream.WriteAsync"/> dispatch genuine OS-level
 /// async I/O (IOCP on Windows, io_uring / epoll on Linux) instead of blocking a thread-pool thread.
 /// </summary>
-internal class FileStreamFactory : IStreamFactory
+internal class FileStreamFactory(string filename, string password, bool readOnly, bool hidden, bool useAesStream = true)
+    : IStreamFactory
 {
-    private readonly string _filename;
-    private readonly bool _hidden;
-    private readonly string _password;
-    private readonly bool _readonly;
-    private readonly bool _useAesStream;
-
-    public FileStreamFactory(string filename, string password, bool readOnly, bool hidden, bool useAesStream = true)
-    {
-        _filename = filename;
-        _password = password;
-        _readonly = readOnly;
-        _hidden = hidden;
-        _useAesStream = useAesStream;
-    }
-
     /// <summary>
     /// Get data filename
     /// </summary>
-    public string Name => Path.GetFileName(_filename);
+    public string Name => Path.GetFileName(filename);
 
     /// <summary>
     /// Create new data file FileStream instance based on filename.
@@ -42,9 +28,9 @@ internal class FileStreamFactory : IStreamFactory
     /// </summary>
     public Stream GetStream(bool canWrite, bool sequencial)
     {
-        var write = canWrite && !_readonly;
+        var write = canWrite && !readOnly;
 
-        var fileMode = _readonly ? FileMode.Open : FileMode.OpenOrCreate;
+        var fileMode = readOnly ? FileMode.Open : FileMode.OpenOrCreate;
         var fileAccess = write ? FileAccess.ReadWrite : FileAccess.Read;
         var fileShare = write ? FileShare.Read : FileShare.ReadWrite;
 
@@ -55,19 +41,19 @@ internal class FileStreamFactory : IStreamFactory
 
         var isNewFile = write && !Exists();
 
-        var stream = new FileStream(_filename,
+        var stream = new FileStream(filename,
             fileMode,
             fileAccess,
             fileShare,
             PAGE_SIZE,
             fileOptions);
 
-        if (isNewFile && _hidden)
+        if (isNewFile && hidden)
         {
-            File.SetAttributes(_filename, FileAttributes.Hidden);
+            File.SetAttributes(filename, FileAttributes.Hidden);
         }
 
-        return _password == null || !_useAesStream ? stream : new AesStream(_password, stream);
+        return password == null || !useAesStream ? stream : new AesStream(password, stream);
     }
 
     /// <summary>
@@ -93,7 +79,7 @@ internal class FileStreamFactory : IStreamFactory
         }
 
         // get physical file length from OS
-        var length = new FileInfo(_filename).Length;
+        var length = new FileInfo(filename).Length;
 
         // if file length are not PAGE_SIZE module, maybe last save are not completed saved on disk
         // crop file removing last uncompleted page saved
@@ -102,7 +88,7 @@ internal class FileStreamFactory : IStreamFactory
             length = length - length % PAGE_SIZE;
 
             using (var fs = new FileStream(
-                       _filename,
+                       filename,
                        FileMode.Open,
                        FileAccess.Write,
                        FileShare.None,
@@ -115,7 +101,7 @@ internal class FileStreamFactory : IStreamFactory
         }
 
         // if encrypted must remove salt first page (only if page contains data)
-        return length > 0 ? length - (_password == null ? 0 : PAGE_SIZE) : 0;
+        return length > 0 ? length - (password == null ? 0 : PAGE_SIZE) : 0;
     }
 
     /// <summary>
@@ -123,7 +109,7 @@ internal class FileStreamFactory : IStreamFactory
     /// </summary>
     public bool Exists()
     {
-        return File.Exists(_filename);
+        return File.Exists(filename);
     }
 
     /// <summary>
@@ -131,7 +117,7 @@ internal class FileStreamFactory : IStreamFactory
     /// </summary>
     public void Delete()
     {
-        File.Delete(_filename);
+        File.Delete(filename);
     }
 
     /// <summary>
@@ -139,7 +125,7 @@ internal class FileStreamFactory : IStreamFactory
     /// </summary>
     public bool IsLocked()
     {
-        return Exists() && FileHelper.IsFileLocked(_filename);
+        return Exists() && FileHelper.IsFileLocked(filename);
     }
 
     /// <summary>
