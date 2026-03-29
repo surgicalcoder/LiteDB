@@ -24,7 +24,7 @@ internal static class ExpressionExtensions
         // enum properties seem to get compiled with Convert(prop, Int32) wrapper calls on Mono 5.0+
         // this causes path extraction code below to fail, since a clean "x.y.z" string is expected
         // thus we strip out any Converts found, using a loop in case there are nested Convert expressions
-        while (expr.NodeType == ExpressionType.Convert || expr.NodeType == ExpressionType.ConvertChecked)
+        while (expr.NodeType is ExpressionType.Convert or ExpressionType.ConvertChecked)
         {
             expr = ((UnaryExpression)expr).Operand;
         }
