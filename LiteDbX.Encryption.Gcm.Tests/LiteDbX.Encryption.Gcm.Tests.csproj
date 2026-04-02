@@ -3,7 +3,7 @@
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <RootNamespace>LiteDbX.Encryption.Gcm.Tests</RootNamespace>
-        <Authors>Maurício David</Authors>
+        <Authors>SurgicalCoder, Maurício David et al.</Authors>
         <Copyright>MIT</Copyright>
         <NeutralLanguage>en-US</NeutralLanguage>
         <GenerateDocumentationFile>false</GenerateDocumentationFile>
