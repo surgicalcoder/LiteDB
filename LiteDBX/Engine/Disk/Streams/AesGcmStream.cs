@@ -3,6 +3,7 @@ using System.Buffers;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 #if !NET10_0_OR_GREATER
@@ -27,7 +28,7 @@ public class AesGcmStream : Stream, IEncryptedStream
     private const int EncryptedPageSize = NonceSize + PAGE_SIZE + TagSize;
 
     private static readonly ArrayPool<byte> BufferPool = ArrayPool<byte>.Shared;
-    private static readonly byte[] HeaderMagic = { (byte)'L', (byte)'D', (byte)'B', (byte)'X', (byte)'G', (byte)'C', (byte)'M', (byte)'1' };
+    private static readonly byte[] HeaderMagic = "LDBXGCM1"u8.ToArray();
     private static readonly byte[] PasswordCheckPlaintext = Enumerable.Repeat((byte)1, PasswordCheckCiphertextSize).ToArray();
 
     private readonly byte[] _key;
@@ -38,9 +39,8 @@ public class AesGcmStream : Stream, IEncryptedStream
     public AesGcmStream(string password, Stream stream)
     {
         if (password == null) throw new ArgumentNullException(nameof(password));
-        if (stream == null) throw new ArgumentNullException(nameof(stream));
 
-        _stream = stream;
+        _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _name = _stream is FileStream fileStream ? Path.GetFileName(fileStream.Name) : null;
 
         var isNew = _stream.Length < PAGE_SIZE;

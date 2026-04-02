@@ -373,14 +373,35 @@ public partial class BsonMapper
         return this;
     }
 
-    private readonly Regex _lowerCaseDelimiter = new("(?!(^[A-Z]))([A-Z])", RegexOptions.Compiled);
-
     /// <summary>
     /// Uses lower camel case with delimiter to convert property names to field names
     /// </summary>
     public BsonMapper UseLowerCaseDelimiter(char delimiter = '_')
     {
-        ResolveFieldName = s => _lowerCaseDelimiter.Replace(s, delimiter + "$2").ToLower();
+        ResolveFieldName = s =>
+        {
+            if (string.IsNullOrEmpty(s))
+                return s;
+
+            Span<char> buffer = stackalloc char[s.Length * 2];
+            int pos = 0;
+
+            for (int i = 0; i < s.Length; i++)
+            {
+                var c = s[i];
+
+                if (i > 0 && char.IsUpper(c))
+                    buffer[pos++] = delimiter;
+
+                buffer[pos++] = char.ToLowerInvariant(c);
+            }
+
+#if NETSTANDARD2_0
+            return new string(buffer.Slice(0, pos).ToArray());
+#else
+            return new string(buffer.Slice(0, pos));
+#endif
+        };
 
         return this;
     }
