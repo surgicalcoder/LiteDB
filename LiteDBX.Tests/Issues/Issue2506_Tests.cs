@@ -10,7 +10,7 @@ public class Issue2506_Tests
     [Fact]
     public async Task Test()
     {
-        await using LiteDatabase dataBase = new("demo.db");
+        await using LiteDatabase dataBase = await LiteDatabase.Open("demo.db");
         var fileStorage = dataBase.GetStorage<string>("myFiles", "myChunks");
 
         // Upload empty test file to file storage

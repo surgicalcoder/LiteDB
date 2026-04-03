@@ -151,7 +151,8 @@ public class Collation_Tests
 
         await using var engine = await LiteEngine.Open(s);
         await using var db = new LiteDatabase(engine, disposeOnClose: false);
-        db.Collation.Culture.Name.Should().Be("en-US");
-        db.Collation.SortOptions.Should().Be(CompareOptions.None);
+        var collation = new Collation((await db.Pragma(Pragmas.COLLATION)).AsString);
+        collation.Culture.Name.Should().Be("en-US");
+        collation.SortOptions.Should().Be(CompareOptions.None);
     }
 }

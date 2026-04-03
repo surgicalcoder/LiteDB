@@ -17,8 +17,8 @@ Today the project includes:
 
 > **Current status**
 >
-> A large portion of the async redesign has landed in the codebase already: public CRUD/query contracts, explicit transactions, async query execution, async file-storage handles, and the optional GCM provider.
-> Some lifecycle and peripheral cleanup work is still tracked in `docs/async-redesign/`.
+> LiteDbX now exposes an async-only public lifecycle and data-access surface: open databases with `await LiteDatabase.Open(...)`, `await LiteRepository.Open(...)`, or `await LiteEngine.Open(...)`, use async CRUD/query APIs, and dispose with `await using`.
+> The material under `docs/async-redesign/` remains useful as design history and implementation background, but the primary async-only API shape is now in place.
 
 ## Install
 
@@ -42,15 +42,13 @@ Current targets in this repository are:
 
 ## Quick start
 
-LiteDbX operations are async-first today. Prefer the explicit open lifecycle and use `await` / `await using` for database work and disposal.
+LiteDbX operations are async-only. Use the explicit open lifecycle and `await` / `await using` for database work and disposal.
 
 The canonical entry points are:
 
 - `await LiteDatabase.Open(...)`
 - `await LiteRepository.Open(...)`
 - `await LiteEngine.Open(...)`
-
-Constructor-based open still exists in a few public types as a compatibility bridge, but it is no longer the recommended lifecycle.
 
 ```csharp
 public class Customer
@@ -131,11 +129,11 @@ For repository-style code, prefer:
 await using var repo = await LiteRepository.Open("filename=my-data.db");
 ```
 
-Compatibility notes:
+Async-only notes:
 
-- constructor-based open remains available in `LiteDatabase`, `LiteRepository`, and `LiteEngine` for legacy callers
-- synchronous pragma-backed properties such as `UserVersion`, `Timeout`, `LimitSize`, `UtcDate`, `CheckpointSize`, and `Collation` remain convenience bridges over async engine pragmas
-- blocking `Dispose()` still exists, but `await using` / `DisposeAsync()` is the supported shutdown path
+- open databases and repositories through `LiteDatabase.Open(...)`, `LiteRepository.Open(...)`, or `LiteEngine.Open(...)`
+- configure runtime pragmas through the async `Pragma(...)` APIs
+- dispose database, repository, engine, transaction, and file-storage handles with `await using` / `DisposeAsync()`
 
 ## Query APIs: native `Query()` and provider-backed LINQ
 
@@ -310,7 +308,7 @@ If you need cross-process file coordination, prefer `LockFile` rather than assum
 
 ## Project status and design docs
 
-The repository contains detailed handoff and decision docs for the ongoing redesign work.
+The repository contains detailed handoff and decision docs for the async redesign that produced the current API shape.
 
 Recommended starting points:
 
@@ -320,11 +318,9 @@ Recommended starting points:
 - `docs/aes-gcm-mode.md` — implementation-focused GCM format notes
 - `docs/INHERITED_BSONMAPPER_CONVENTIONS_PLAN.md` — mapper convention design work
 
-Important current caveats tracked in those docs include:
+Important implementation notes and remaining behavioral boundaries tracked in those docs include:
 
-- constructor-based open still exists as a transitional compatibility path, but the supported lifecycle is now `await LiteDatabase.Open(...)`
-- `await LiteRepository.Open(...)` and `await LiteEngine.Open(...)` follow the same supported async-first lifecycle pattern
-- some synchronous convenience surfaces remain as compatibility bridges over async internals, especially constructor-based open and pragma-backed configuration properties
+- `await LiteDatabase.Open(...)`, `await LiteRepository.Open(...)`, and `await LiteEngine.Open(...)` are the supported lifecycle entry points
 - shared/lock-file modes are intentionally limited relative to direct mode, especially around explicit transaction scope
 - provider-backed LINQ is intentionally a supported subset, not a full general-purpose LINQ provider
 

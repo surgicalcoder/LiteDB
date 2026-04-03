@@ -127,26 +127,6 @@ public class ConnectionString
     /// </summary>
     public string this[string key] => _values.GetOrDefault(key);
 
-    /// <summary>
-    /// Create an <see cref="ILiteEngine"/> from the parsed connection string using the legacy
-    /// constructor-based lifecycle.
-    ///
-    /// This method is retained only as compatibility glue for constructor-era callers such as
-    /// <see cref="LiteDatabase"/> and <see cref="LiteRepository"/> synchronous constructors.
-    /// Prefer <see cref="OpenEngine"/> for the supported async-first lifecycle.
-    /// </summary>
-    internal ILiteEngine CreateEngine(Action<EngineSettings> engineSettingsAction = null)
-    {
-        var settings = CreateSettings(engineSettingsAction);
-
-        return Connection switch
-        {
-            ConnectionType.Direct => new LiteEngine(settings),
-            ConnectionType.Shared => new SharedEngine(settings),
-            ConnectionType.LockFile => new LockFileEngine(settings),
-            _ => throw new NotImplementedException()
-        };
-    }
 
     /// <summary>
     /// Open an engine using the supported async-first lifecycle.

@@ -13,8 +13,7 @@ namespace LiteDbX;
 /// Prefer <see cref="Open(string, BsonMapper, CancellationToken)"/>,
 /// <see cref="Open(ConnectionString, BsonMapper, CancellationToken)"/>, or
 /// <see cref="Open(Stream, BsonMapper, Stream, CancellationToken)"/> together with
-/// <c>await using</c>. Constructor-based opens and blocking <see cref="Dispose()"/> remain as
-/// compatibility bridges only.
+/// <c>await using</c>.
 /// </summary>
 public class LiteRepository : ILiteRepository
 {
@@ -51,8 +50,6 @@ public class LiteRepository : ILiteRepository
 
     #endregion
 
-    #region Constructors
-
     /// <summary>
     /// Wrap an existing <see cref="ILiteDatabase"/> instance.
     /// This overload does not open a database; it only layers repository helpers over an already
@@ -62,35 +59,6 @@ public class LiteRepository : ILiteRepository
     {
         Database = database ?? throw new ArgumentNullException(nameof(database));
     }
-
-    /// <summary>
-    /// Transitional synchronous lifecycle path retained for compatibility; prefer
-    /// <see cref="Open(string, BsonMapper, CancellationToken)"/>.
-    /// </summary>
-    public LiteRepository(string connectionString, BsonMapper mapper = null)
-    {
-        Database = new LiteDatabase(connectionString, mapper);
-    }
-
-    /// <summary>
-    /// Transitional synchronous lifecycle path retained for compatibility; prefer
-    /// <see cref="Open(ConnectionString, BsonMapper, CancellationToken)"/>.
-    /// </summary>
-    public LiteRepository(ConnectionString connectionString, BsonMapper mapper = null)
-    {
-        Database = new LiteDatabase(connectionString, mapper);
-    }
-
-    /// <summary>
-    /// Transitional synchronous lifecycle path retained for compatibility; prefer
-    /// <see cref="Open(Stream, BsonMapper, Stream, CancellationToken)"/>.
-    /// </summary>
-    public LiteRepository(Stream stream, BsonMapper mapper = null, Stream logStream = null)
-    {
-        Database = new LiteDatabase(stream, mapper, logStream);
-    }
-
-    #endregion
 
     #region Query (sync builder — no I/O)
 
@@ -230,20 +198,6 @@ public class LiteRepository : ILiteRepository
     /// <inheritdoc/>
     public ValueTask DisposeAsync() => Database.DisposeAsync();
 
-    /// <summary>
-    /// Synchronous dispose convenience retained for compatibility. Delegates to
-    /// <see cref="DisposeAsync"/> and blocks; prefer <c>await using</c> where possible.
-    /// </summary>
-    public void Dispose()
-    {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
-        GC.SuppressFinalize(this);
-    }
-
-    ~LiteRepository()
-    {
-        Dispose();
-    }
 
     #endregion
 }

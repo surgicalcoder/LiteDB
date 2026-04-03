@@ -9,6 +9,8 @@ namespace LiteDbX.Tests.Engine;
 
 public class LockFileEngine_Tests
 {
+    private const int InvalidDatafileStateOffset = 191;
+
     [Fact]
     public void Constructor_Requires_Physical_Filename()
     {
@@ -89,6 +91,50 @@ public class LockFileEngine_Tests
 
         (await collection.Count()).Should().Be(0);
         File.Exists(file.Filename).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AutoRebuild_Read_Operation_Uses_Write_Lock_File_Coordination()
+    {
+        using var file = new TempFile();
+
+        await using (var seed = await LiteDatabase.Open(new ConnectionString
+        {
+            Filename = file.Filename,
+            Connection = ConnectionType.Direct
+        }))
+        {
+            await seed.GetCollection("items").Insert(new BsonDocument { ["_id"] = 1 });
+        }
+
+        using (var stream = new FileStream(file.Filename, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            stream.Position = InvalidDatafileStateOffset;
+            stream.WriteByte(1);
+        }
+
+        var lockFilename = FileHelper.GetLockFile(file.Filename);
+
+        await using var database = await LiteDatabase.Open(new ConnectionString
+        {
+            Filename = file.Filename,
+            Connection = ConnectionType.LockFile,
+            AutoRebuild = true
+        });
+
+        var collection = database.GetCollection("items");
+
+        using (new FileStream(lockFilename, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            {
+                await collection.Count(cts.Token);
+            });
+        }
+
+        (await collection.Count()).Should().Be(1);
     }
 }
 

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using LiteDbX.Engine;
 using Xunit;
 
 namespace LiteDbX.Tests.Engine;
@@ -20,7 +21,7 @@ public class ThreadSafety_WalCheckpoint_Tests
 
         await using (var db = await LiteDatabase.Open(file.Filename))
         {
-            db.CheckpointSize = 0;
+            await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
 
             var tasks = Enumerable.Range(0, 8)
@@ -64,7 +65,7 @@ public class ThreadSafety_WalCheckpoint_Tests
 
         await using (var db = await LiteDatabase.Open(file.Filename))
         {
-            db.CheckpointSize = 0;
+            await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
             using var cts = new CancellationTokenSource();
 
@@ -129,7 +130,7 @@ public class ThreadSafety_WalCheckpoint_Tests
         using var file = new TempFile();
 
         await using var db = await LiteDatabase.Open(file.Filename);
-        db.CheckpointSize = 0;
+        await db.Pragma(Pragmas.CHECKPOINT, 0);
         var col = db.GetCollection("items");
         var writerHolding = new SemaphoreSlim(0, 1);
         var releaseWriter = new SemaphoreSlim(0, 1);
@@ -166,7 +167,7 @@ public class ThreadSafety_WalCheckpoint_Tests
 
         await using (var db = await LiteDatabase.Open(file.Filename))
         {
-            db.CheckpointSize = 0;
+            await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
             await col.Insert(Enumerable.Range(1, 25).Select(i => new BsonDocument { ["_id"] = i, ["v"] = i }));
 
@@ -193,7 +194,7 @@ public class ThreadSafety_WalCheckpoint_Tests
         var observedCounts = new ConcurrentQueue<int>();
 
         await using var db = await LiteDatabase.Open(file.Filename);
-        db.CheckpointSize = 0;
+        await db.Pragma(Pragmas.CHECKPOINT, 0);
         var col = db.GetCollection("items");
         using var cts = new CancellationTokenSource();
 

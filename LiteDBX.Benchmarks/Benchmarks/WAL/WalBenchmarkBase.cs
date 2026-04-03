@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using LiteDbX.Encryption.Gcm;
+using LiteDbX.Engine;
 
 namespace LiteDbX.Benchmarks.Benchmarks.WAL
 {
@@ -44,7 +45,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.WAL
             };
 
             DatabaseInstance = await LiteDatabase.Open(connectionString).ConfigureAwait(false);
-            DatabaseInstance.CheckpointSize = checkpointSize;
+            await DatabaseInstance.Pragma(Pragmas.CHECKPOINT, checkpointSize).ConfigureAwait(false);
         }
 
         protected async Task CloseDatabaseAsync()

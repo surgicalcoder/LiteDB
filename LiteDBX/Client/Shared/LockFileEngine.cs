@@ -29,7 +29,7 @@ namespace LiteDbX;
 /// <see cref="ILiteTransaction"/> scope.
 /// </para>
 /// </summary>
-public class LockFileEngine : ILiteEngine, IDisposable
+public class LockFileEngine : ILiteEngine
 {
     private const int LockRetryDelayMilliseconds = 25;
 
@@ -54,7 +54,7 @@ public class LockFileEngine : ILiteEngine, IDisposable
         public LeaseContext Previous { get; }
     }
 
-    private sealed class Lease : IDisposable, IAsyncDisposable
+    private sealed class Lease : IAsyncDisposable
     {
         private readonly LockFileEngine _owner;
         private readonly LeaseContext _context;
@@ -78,17 +78,11 @@ public class LockFileEngine : ILiteEngine, IDisposable
 
         public LiteEngine Engine { get; }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (_disposed) return;
             _disposed = true;
-            _owner.ReleaseLease(_session, _context, _ownsAmbientContext);
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            Dispose();
-            return default;
+            await _owner.ReleaseLeaseAsync(_session, _context, _ownsAmbientContext).ConfigureAwait(false);
         }
     }
 
@@ -110,54 +104,6 @@ public class LockFileEngine : ILiteEngine, IDisposable
         {
             throw new NotSupportedException(
                 "ConnectionType.LockFile is supported only for physical file-backed databases and does not support custom streams, ':memory:', or ':temp:'.");
-        }
-    }
-
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    ~LockFileEngine() { Dispose(false); }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (!disposing) return;
-
-        LiteEngine engineToDispose = null;
-        FileStream lockStreamToDispose = null;
-        var disposeGate = false;
-
-        lock (_syncRoot)
-        {
-            if (_disposed || _disposeRequested) return;
-
-            _disposeRequested = true;
-
-            if (_activeSession == null)
-            {
-                _disposed = true;
-                engineToDispose = _engine;
-                _engine = null;
-                lockStreamToDispose = _lockStream;
-                _lockStream = null;
-                disposeGate = true;
-            }
-        }
-
-        try
-        {
-            engineToDispose?.Dispose();
-        }
-        finally
-        {
-            lockStreamToDispose?.Dispose();
-
-            if (disposeGate)
-            {
-                _gate.Dispose();
-            }
         }
     }
 
@@ -200,8 +146,6 @@ public class LockFileEngine : ILiteEngine, IDisposable
                 _gate.Dispose();
             }
         }
-
-        GC.SuppressFinalize(this);
     }
 
     private static bool SupportsLockFile(EngineSettings settings)
@@ -265,25 +209,46 @@ public class LockFileEngine : ILiteEngine, IDisposable
 
             var engine = await LiteEngine.Open(CreateOperationSettings(requiresWriteAccess), cancellationToken).ConfigureAwait(false);
 
+            Lease lease = null;
+            LiteEngine engineToDispose = null;
+            FileStream lockStreamToDispose = null;
+            var disposed = false;
+
             lock (_syncRoot)
             {
                 if (_disposed || _disposeRequested)
                 {
-                    engine.Dispose();
-                    lockStream?.Dispose();
-                    throw new ObjectDisposedException(nameof(LockFileEngine));
+                    disposed = true;
+                    engineToDispose = engine;
+                    lockStreamToDispose = lockStream;
                 }
+                else
+                {
+                    var session = new SharedSession { RefCount = 1, HasWriteAccess = requiresWriteAccess };
+                    var context = new LeaseContext(this, session, ambient);
 
-                var session = new SharedSession { RefCount = 1, HasWriteAccess = requiresWriteAccess };
-                var context = new LeaseContext(this, session, ambient);
+                    _engine = engine;
+                    _lockStream = lockStream;
+                    _activeSession = session;
+                    _currentLease.Value = context;
 
-                _engine = engine;
-                _lockStream = lockStream;
-                _activeSession = session;
-                _currentLease.Value = context;
-
-                return new Lease(this, session, context, ownsAmbientContext: true, engine);
+                    lease = new Lease(this, session, context, ownsAmbientContext: true, engine);
+                }
             }
+
+            if (engineToDispose != null)
+            {
+                await engineToDispose.DisposeAsync().ConfigureAwait(false);
+            }
+
+            lockStreamToDispose?.Dispose();
+
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(LockFileEngine));
+            }
+
+            return lease;
         }
         catch
         {
@@ -305,7 +270,12 @@ public class LockFileEngine : ILiteEngine, IDisposable
             return false;
         }
 
-        return !File.Exists(_settings.Filename);
+        if (!File.Exists(_settings.Filename))
+        {
+            return true;
+        }
+
+        return _settings.AutoRebuild || _settings.Upgrade;
     }
 
     private EngineSettings CreateOperationSettings(bool write)
@@ -361,7 +331,7 @@ public class LockFileEngine : ILiteEngine, IDisposable
         }
     }
 
-    private void ReleaseLease(SharedSession session, LeaseContext context, bool ownsAmbientContext)
+    private async ValueTask ReleaseLeaseAsync(SharedSession session, LeaseContext context, bool ownsAmbientContext)
     {
         LiteEngine engineToDispose = null;
         FileStream lockStreamToDispose = null;
@@ -407,7 +377,10 @@ public class LockFileEngine : ILiteEngine, IDisposable
 
         try
         {
-            engineToDispose?.Dispose();
+            if (engineToDispose != null)
+            {
+                await engineToDispose.DisposeAsync().ConfigureAwait(false);
+            }
         }
         finally
         {

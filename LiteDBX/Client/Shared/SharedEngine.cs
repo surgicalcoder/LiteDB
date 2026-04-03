@@ -50,7 +50,7 @@ public class SharedEngine : ILiteEngine
         public LeaseContext Previous { get; }
     }
 
-    private sealed class Lease : IDisposable, IAsyncDisposable
+    private sealed class Lease : IAsyncDisposable
     {
         private readonly SharedEngine _owner;
         private readonly LeaseContext _context;
@@ -74,17 +74,11 @@ public class SharedEngine : ILiteEngine
 
         public LiteEngine Engine { get; }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (_disposed) return;
             _disposed = true;
-            _owner.ReleaseLease(_session, _context, _ownsAmbientContext);
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            Dispose();
-            return default;
+            await _owner.ReleaseLeaseAsync(_session, _context, _ownsAmbientContext).ConfigureAwait(false);
         }
     }
 
@@ -105,44 +99,6 @@ public class SharedEngine : ILiteEngine
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
-
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    ~SharedEngine() { Dispose(false); }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (!disposing) return;
-
-        LiteEngine engineToDispose = null;
-        var disposeGate = false;
-
-        lock (_syncRoot)
-        {
-            if (_disposed || _disposeRequested) return;
-
-            _disposeRequested = true;
-
-            if (_activeSession == null)
-            {
-                _disposed = true;
-                engineToDispose = _engine;
-                _engine = null;
-                disposeGate = true;
-            }
-        }
-
-        engineToDispose?.Dispose();
-
-        if (disposeGate)
-        {
-            _gate.Dispose();
-        }
-    }
 
     /// <summary>
     /// Phase 6: <see cref="DisposeAsync"/> respects the active shared-session lease and only
@@ -177,8 +133,6 @@ public class SharedEngine : ILiteEngine
         {
             _gate.Dispose();
         }
-
-        GC.SuppressFinalize(this);
     }
 
     // ── Shared-session lease helpers ───────────────────────────────────────────
@@ -244,34 +198,52 @@ public class SharedEngine : ILiteEngine
                 engine = await LiteEngine.Open(_settings, cancellationToken).ConfigureAwait(false);
             }
 
+            Lease lease = null;
+            LiteEngine engineToDispose = null;
+            var disposed = false;
+
             lock (_syncRoot)
             {
                 if (_disposed || _disposeRequested)
                 {
-                    engine.Dispose();
-                    throw new ObjectDisposedException(nameof(SharedEngine));
+                    disposed = true;
+                    engineToDispose = engine;
                 }
-
-                if (_engine == null)
+                else
                 {
-                    _engine = engine;
+                    if (_engine == null)
+                    {
+                        _engine = engine;
+                    }
+                    else if (!ReferenceEquals(_engine, engine))
+                    {
+                        engineToDispose = engine;
+                        engine = _engine;
+                    }
+
+                    var session = new SharedSession { RefCount = 1 };
+
+                    _activeSession = session;
+
+                    var context = new LeaseContext(this, session, ambient);
+
+                    _currentLease.Value = context;
+
+                    lease = new Lease(this, session, context, ownsAmbientContext: true, engine);
                 }
-                else if (!ReferenceEquals(_engine, engine))
-                {
-                    engine.Dispose();
-                    engine = _engine;
-                }
-
-                var session = new SharedSession { RefCount = 1 };
-
-                _activeSession = session;
-
-                var context = new LeaseContext(this, session, ambient);
-
-                _currentLease.Value = context;
-
-                return new Lease(this, session, context, ownsAmbientContext: true, engine);
             }
+
+            if (engineToDispose != null)
+            {
+                await engineToDispose.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(SharedEngine));
+            }
+
+            return lease;
         }
         catch
         {
@@ -280,7 +252,7 @@ public class SharedEngine : ILiteEngine
         }
     }
 
-    private void ReleaseLease(SharedSession session, LeaseContext context, bool ownsAmbientContext)
+    private async ValueTask ReleaseLeaseAsync(SharedSession session, LeaseContext context, bool ownsAmbientContext)
     {
         LiteEngine engineToDispose = null;
         var releaseGate = false;
@@ -320,7 +292,10 @@ public class SharedEngine : ILiteEngine
             }
         }
 
-        engineToDispose?.Dispose();
+        if (engineToDispose != null)
+        {
+            await engineToDispose.DisposeAsync().ConfigureAwait(false);
+        }
 
         if (releaseGate)
         {

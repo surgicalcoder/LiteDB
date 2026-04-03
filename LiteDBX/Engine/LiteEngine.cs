@@ -15,33 +15,20 @@ namespace LiteDbX.Engine;
 /// Its isolated from complete solution - works on low level only (no linq, no poco... just BSON objects)
 /// [ThreadSafe]
 /// </summary>
-public partial class LiteEngine : ILiteEngine, IDisposable
+public partial class LiteEngine : ILiteEngine
 {
     /// <summary>
     /// Explicit async-first engine open boundary.
     ///
     /// Recovery, upgrade detection, rebuild reopen, and WAL restore now run on this awaitable
-    /// startup path. The constructor-based startup path is retained only as a transitional
-    /// compatibility bridge.
+    /// startup path.
     /// </summary>
     public static async ValueTask<LiteEngine> Open(EngineSettings settings, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var engine = new LiteEngine(settings, openOnConstruction: false);
+        var engine = new LiteEngine(settings);
         await engine.OpenInstance(cancellationToken).ConfigureAwait(false);
-        return engine;
-    }
-
-    /// <summary>
-    /// Centralized synchronous engine-open compatibility bridge.
-    /// Internal callers that still need constructor-era sync startup should go through this helper
-    /// instead of constructing <see cref="LiteEngine"/> ad hoc.
-    /// </summary>
-    internal static LiteEngine OpenSync(EngineSettings settings)
-    {
-        var engine = new LiteEngine(settings, openOnConstruction: false);
-        engine.Open();
         return engine;
     }
 
@@ -65,19 +52,6 @@ public partial class LiteEngine : ILiteEngine, IDisposable
     {
         await CloseAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
-    }
-
-    // ── IDisposable (retained as a sync convenience for internal callers) ──────
-
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        Close();
     }
 
     #region Services instances
@@ -113,36 +87,10 @@ public partial class LiteEngine : ILiteEngine, IDisposable
 
     #region Ctor
 
-    /// <summary>
-    /// Initialize LiteEngine using connection memory database
-    /// </summary>
-    public LiteEngine()
-        : this(new EngineSettings { DataStream = new MemoryStream() }, openOnConstruction: true) { }
 
-    /// <summary>
-    /// Initialize LiteEngine using connection string using key=value; parser
-    /// </summary>
-    public LiteEngine(string filename)
-        : this(new EngineSettings { Filename = filename }, openOnConstruction: true) { }
-
-    /// <summary>
-    /// Initialize LiteEngine using initial engine settings.
-    /// Transitional synchronous lifecycle path retained for compatibility; prefer
-    /// <see cref="Open(EngineSettings, CancellationToken)"/> for supported async-first startup.
-    /// </summary>
-    public LiteEngine(EngineSettings settings)
-        : this(settings, openOnConstruction: true)
-    {
-    }
-
-    private LiteEngine(EngineSettings settings, bool openOnConstruction)
+    private LiteEngine(EngineSettings settings)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-
-        if (openOnConstruction)
-        {
-            Open();
-        }
     }
 
     #endregion
@@ -252,98 +200,6 @@ public partial class LiteEngine : ILiteEngine, IDisposable
         throw LiteException.InvalidDatabase();
     }
 
-    internal bool Open()
-    {
-        LOG($"start initializing{(_settings.ReadOnly ? " (readonly)" : "")}", "ENGINE");
-
-        _systemCollections = new Dictionary<string, SystemCollection>(StringComparer.OrdinalIgnoreCase);
-        _sequences = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-
-        try
-        {
-            // initialize engine state 
-            _state = new EngineState(this, _settings);
-
-            // before initilize, try if must be upgrade
-            if (_settings.Upgrade)
-            {
-                TryUpgrade();
-            }
-
-            // initialize disk service (will create database if needed)
-            _disk = new DiskService(_settings, _state, MEMORY_SEGMENT_SIZES);
-
-            // read page with no cache ref (has a own PageBuffer) - do not Release() support
-            var buffer = _disk.ReadFull(FileOrigin.Data).First();
-
-            // if first byte are 1 this datafile are encrypted but has do defined password to open
-            if (buffer[0] == 1)
-            {
-                throw new LiteException(0, "This data file is encrypted and needs a password to open");
-            }
-
-            // read header database page
-            _header = new HeaderPage(buffer);
-
-            // if database is set to invalid state, need rebuild
-            if (buffer[HeaderPage.P_INVALID_DATAFILE_STATE] != 0 && _settings.AutoRebuild)
-            {
-                // dispose disk access to rebuild process
-                _disk.Dispose();
-                _disk = null;
-
-                // rebuild database, create -backup file and include _rebuild_errors collection
-                Recovery(_header.Pragmas.Collation);
-
-                // re-initialize disk service
-                _disk = new DiskService(_settings, _state, MEMORY_SEGMENT_SIZES);
-
-                // read buffer header page again
-                buffer = _disk.ReadFull(FileOrigin.Data).First();
-
-                _header = new HeaderPage(buffer);
-            }
-
-            // test for same collation
-            if (_settings.Collation != null && _settings.Collation.ToString() != _header.Pragmas.Collation.ToString())
-            {
-                throw new LiteException(0, $"Datafile collation '{_header.Pragmas.Collation}' is different from engine settings. Use Rebuild database to change collation.");
-            }
-
-            // initialize locker service
-            _locker = new LockService(_header.Pragmas);
-
-            // initialize wal-index service
-            _walIndex = new WalIndexService(_disk, _locker);
-
-            // if exists log file, restore wal index references (can update full _header instance)
-            if (_disk.GetFileLength(FileOrigin.Log) > 0)
-            {
-                _walIndex.RestoreIndex(ref _header);
-            }
-
-            // initialize sort temp disk
-            _sortDisk = new SortDisk(_settings.CreateTempFactory(), CONTAINER_SORT_SIZE, _header.Pragmas);
-
-            // initialize transaction monitor as last service
-            _monitor = new TransactionMonitor(_header, _locker, _disk, _walIndex);
-
-            // register system collections
-            InitializeSystemCollections();
-
-            LOG("initialization completed", "ENGINE");
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LOG(ex.Message, "ERROR");
-
-            Close(ex);
-
-            throw;
-        }
-    }
 
     /// <summary>
     /// Normal close process:
@@ -367,7 +223,7 @@ public partial class LiteEngine : ILiteEngine, IDisposable
         // stop running all transactions
         tc.Catch(() => _monitor?.Dispose());
 
-        if (_header?.Pragmas.Checkpoint > 0)
+        if (!_settings.ReadOnly && _header?.Pragmas.Checkpoint > 0)
         {
             // do a soft checkpoint (only if exclusive lock is possible)
             tc.Catch(() => _walIndex?.TryCheckpoint().GetAwaiter().GetResult());
@@ -402,7 +258,7 @@ public partial class LiteEngine : ILiteEngine, IDisposable
         try { _monitor?.Dispose(); }
         catch (Exception ex) { exceptions.Add(ex); }
 
-        if (_header?.Pragmas.Checkpoint > 0 && _walIndex != null)
+        if (!_settings.ReadOnly && _header?.Pragmas.Checkpoint > 0 && _walIndex != null)
         {
             try { await _walIndex.TryCheckpoint().ConfigureAwait(false); }
             catch (Exception ex) { exceptions.Add(ex); }

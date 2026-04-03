@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using LiteDbX.Engine;
 using Xunit;
 
 namespace LiteDbX.Tests.Engine;
@@ -16,7 +17,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     public async Task Concurrent_Writers_On_Same_Collection_Do_Not_Overlap()
     {
         await using var db = await LiteDatabase.Open(new MemoryStream());
-        db.Timeout = TimeSpan.FromSeconds(2);
+        await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(2).TotalSeconds);
 
         var col = db.GetCollection("items");
         var releaseWriter = new SemaphoreSlim(0, 1);
@@ -62,7 +63,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     public async Task Concurrent_Writers_On_Different_Collections_Can_Proceed()
     {
         await using var db = await LiteDatabase.Open(new MemoryStream());
-        db.Timeout = TimeSpan.FromSeconds(2);
+        await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(2).TotalSeconds);
 
         var left = db.GetCollection("left");
         var right = db.GetCollection("right");
@@ -233,7 +234,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     public async Task Dispose_Without_Commit_Releases_Collection_Lock_And_Transaction_Gate()
     {
         await using var db = await LiteDatabase.Open(new MemoryStream());
-        db.Timeout = TimeSpan.FromSeconds(2);
+        await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(2).TotalSeconds);
         var col = db.GetCollection("items");
 
         var tx = await db.BeginTransaction();

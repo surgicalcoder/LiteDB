@@ -12,9 +12,6 @@ namespace LiteDbX.Engine;
 ///   <see cref="RebuildAsync"/> is the primary path — it awaits all async engine operations
 ///   (open, Pragma, Insert, Checkpoint) without any <c>GetAwaiter().GetResult()</c> calls.
 ///
-///   <see cref="Rebuild"/> (sync) is retained exclusively for the <c>Recovery()</c> call
-///   inside <see cref="LiteEngine.Open()"/>, which runs synchronously from the constructor.
-///   Do not call <see cref="Rebuild"/> from any other site.
 /// [ThreadSafe]
 /// </summary>
 internal class RebuildService
@@ -94,61 +91,6 @@ internal class RebuildService
             await engine.Checkpoint(cancellationToken).ConfigureAwait(false);
         }
 
-        return SwapFiles(_settings.Filename, tempFilename, backupFilename, backupLogFilename);
-    }
-
-    // ── Sync path (constructor/Recovery only — Phase 6 deferred) ─────────────
-
-    /// <summary>
-    /// Synchronous rebuild used exclusively by <see cref="LiteEngine"/>'s recovery path,
-    /// which is called from the synchronous <c>Open()</c> / constructor path.
-    ///
-    /// This path calls <c>.GetAwaiter().GetResult()</c> on async engine methods because the
-    /// legacy constructor-based startup path is still retained as a transitional compatibility
-    /// bridge.
-    ///
-    /// Do not call this method except from <c>Recovery()</c>.
-    /// </summary>
-    internal long Rebuild(RebuildOptions options)
-    {
-        var backupFilename    = FileHelper.GetSuffixFile(_settings.Filename, "-backup");
-        var backupLogFilename = FileHelper.GetSuffixFile(FileHelper.GetLogFile(_settings.Filename), "-backup");
-        var tempFilename      = FileHelper.GetSuffixFile(_settings.Filename);
-
-        // Keep rebuild work in a nested scope so all file handles are closed before swapping files.
-        using (var reader = _fileVersion == 7
-            ? (IFileReader)new FileReaderV7(_settings)
-            : new FileReaderV8(_settings, options.Errors))
-        {
-            reader.Open();
-
-            using var engine = LiteEngine.OpenSync(new EngineSettings
-            {
-                Filename   = tempFilename,
-                Collation  = options.Collation,
-                Password   = options.Password
-            });
-
-            // Phase 6 deferred: sync-over-async on the constructor path only.
-            engine.Pragma(Pragmas.CHECKPOINT, 0).GetAwaiter().GetResult();
-
-            engine.RebuildContent(reader);
-
-            if (options.IncludeErrorReport && options.Errors.Count > 0)
-            {
-                var report = options.GetErrorReport();
-                engine.Insert("_rebuild_errors", report, BsonAutoId.Int32).GetAwaiter().GetResult();
-            }
-
-            var pragmas = reader.GetPragmas();
-            engine.Pragma(Pragmas.CHECKPOINT,  pragmas[Pragmas.CHECKPOINT]).GetAwaiter().GetResult();
-            engine.Pragma(Pragmas.TIMEOUT,     pragmas[Pragmas.TIMEOUT]).GetAwaiter().GetResult();
-            engine.Pragma(Pragmas.LIMIT_SIZE,  pragmas[Pragmas.LIMIT_SIZE]).GetAwaiter().GetResult();
-            engine.Pragma(Pragmas.UTC_DATE,    pragmas[Pragmas.UTC_DATE]).GetAwaiter().GetResult();
-            engine.Pragma(Pragmas.USER_VERSION,pragmas[Pragmas.USER_VERSION]).GetAwaiter().GetResult();
-
-            engine.Checkpoint().GetAwaiter().GetResult();
-        }
 
         return SwapFiles(_settings.Filename, tempFilename, backupFilename, backupLogFilename);
     }

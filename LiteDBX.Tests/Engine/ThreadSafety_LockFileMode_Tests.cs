@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using LiteDbX.Engine;
 using Xunit;
 
 namespace LiteDbX.Tests.Engine;
@@ -16,8 +17,8 @@ public class ThreadSafety_LockFileMode_Tests
         await using var first = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
         await using var second = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
 
-        first.Timeout = TimeSpan.FromSeconds(5);
-        second.Timeout = TimeSpan.FromSeconds(5);
+        await first.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
+        await second.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
 
         var firstCol = first.GetCollection("items");
         var secondCol = second.GetCollection("items");
@@ -46,7 +47,7 @@ public class ThreadSafety_LockFileMode_Tests
             .Select(worker => ConcurrencyTestHelper.RunIsolated(async () =>
             {
                 await using var db = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
-                db.Timeout = TimeSpan.FromSeconds(5);
+                await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
                 var col = db.GetCollection("items");
 
                 for (var i = 1; i <= 5; i++)
@@ -76,14 +77,14 @@ public class ThreadSafety_LockFileMode_Tests
         var readerTask = ConcurrencyTestHelper.RunIsolated(async () =>
         {
             await using var db = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
-            db.Timeout = TimeSpan.FromSeconds(5);
+            await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
             return await db.GetCollection("items").Count();
         });
 
         var writerTask = ConcurrencyTestHelper.RunIsolated(async () =>
         {
             await using var db = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
-            db.Timeout = TimeSpan.FromSeconds(5);
+            await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
             await db.GetCollection("items").Insert(new BsonDocument { ["_id"] = 1 });
         });
 

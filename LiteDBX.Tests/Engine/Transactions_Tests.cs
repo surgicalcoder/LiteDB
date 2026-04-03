@@ -62,7 +62,7 @@ public class Transactions_Tests
         var data2 = DataGen.Person(101, 200).ToArray();
 
         await using var db = await LiteDatabase.Open("filename=:memory:");
-        db.Timeout = TimeSpan.FromSeconds(1);
+        await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(1).TotalSeconds);
 
         var person = db.GetCollection<Person>();
         await person.Insert(data1);

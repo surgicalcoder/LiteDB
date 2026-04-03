@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using LiteDbX.Engine;
 using Xunit;
 
 namespace LiteDbX.Tests.Engine;
@@ -17,7 +18,7 @@ public class ThreadSafety_SmokeStress_Tests
 
         await using (var db = await LiteDatabase.Open(file.Filename))
         {
-            db.CheckpointSize = 0;
+            await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
 
             var workers = Enumerable.Range(0, 6)

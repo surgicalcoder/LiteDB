@@ -19,10 +19,10 @@ namespace LiteDbX;
 /// The supported lifecycle is <see cref="Open(string, BsonMapper, CancellationToken)"/>,
 /// <see cref="Open(ConnectionString, BsonMapper, CancellationToken)"/>, or
 /// <see cref="Open(Stream, BsonMapper, Stream, CancellationToken)"/> together with
-/// <c>await using</c>. Constructor-based open and synchronous configuration properties remain as
-/// compatibility bridges only.
+/// <c>await using</c>. Configuration is async-only via <see cref="Pragma(string, CancellationToken)"/>
+/// and <see cref="Pragma(string, BsonValue, CancellationToken)"/>.
 /// </summary>
-public class LiteDatabase : ILiteDatabase, IDisposable
+public class LiteDatabase : ILiteDatabase
 {
     private readonly ILiteEngine _engine;
     private readonly bool _disposeOnClose;
@@ -69,48 +69,6 @@ public class LiteDatabase : ILiteDatabase, IDisposable
         return new LiteDatabase(engine, mapper, disposeOnClose: true);
     }
 
-    #region Constructors
-
-    /// <summary>
-    /// Starts LiteDBX database using a connection string for file system database.
-    /// Transitional synchronous lifecycle path retained for compatibility; prefer
-    /// <see cref="Open(string, BsonMapper, CancellationToken)"/>.
-    /// </summary>
-    public LiteDatabase(string connectionString, BsonMapper mapper = null)
-        : this(new ConnectionString(connectionString), mapper) { }
-
-    /// <summary>
-    /// Starts LiteDBX database using a connection string for file system database.
-    /// Transitional synchronous lifecycle path retained for compatibility; prefer
-    /// <see cref="Open(ConnectionString, BsonMapper, CancellationToken)"/>.
-    /// </summary>
-    public LiteDatabase(ConnectionString connectionString, BsonMapper mapper = null)
-    {
-        if (connectionString == null) throw new ArgumentNullException(nameof(connectionString));
-        _engine = connectionString.CreateEngine();
-        Mapper = mapper ?? BsonMapper.Global;
-        _disposeOnClose = true;
-    }
-
-    /// <summary>
-    /// Starts LiteDBX database using a generic Stream implementation (mostly MemoryStream).
-    /// Transitional synchronous lifecycle path retained for compatibility; prefer
-    /// <see cref="Open(Stream, BsonMapper, Stream, CancellationToken)"/>.
-    /// </summary>
-    /// <param name="stream">DataStream reference </param>
-    /// <param name="mapper">BsonMapper mapper reference</param>
-    /// <param name="logStream">LogStream reference </param>
-    public LiteDatabase(Stream stream, BsonMapper mapper = null, Stream logStream = null)
-    {
-        _engine = new LiteEngine(new EngineSettings
-        {
-            DataStream = stream ?? throw new ArgumentNullException(nameof(stream)),
-            LogStream = logStream
-        });
-        Mapper = mapper ?? BsonMapper.Global;
-        _disposeOnClose = true;
-    }
-
     /// <summary>
     /// Wrap an already-open <see cref="ILiteEngine"/>.
     ///
@@ -124,7 +82,6 @@ public class LiteDatabase : ILiteDatabase, IDisposable
         _disposeOnClose = disposeOnClose;
     }
 
-    #endregion
 
     // ── ILiteDatabase — Configuration ─────────────────────────────────────────
 
@@ -138,71 +95,6 @@ public class LiteDatabase : ILiteDatabase, IDisposable
     /// is implemented as string. Use "GetStorage" for custom options
     /// </summary>
     public ILiteStorage<string> FileStorage => _fs ??= GetStorage<string>();
-
-    /// <summary>
-    /// Get/Set database user version - use this version number to control database change model.
-    /// Transitional synchronous bridge; prefer async <see cref="Pragma(string, CancellationToken)"/>
-    /// and <see cref="Pragma(string, BsonValue, CancellationToken)"/> for async-first configuration access.
-    /// </summary>
-    public int UserVersion
-    {
-        get => _engine.Pragma(Pragmas.USER_VERSION).GetAwaiter().GetResult();
-        set => _engine.Pragma(Pragmas.USER_VERSION, value).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Get/Set database timeout - this timeout is used to wait for unlock using transactions.
-    /// Transitional synchronous bridge; prefer async pragma access via <see cref="Pragma(string, CancellationToken)"/>
-    /// or <see cref="Pragma(string, BsonValue, CancellationToken)"/>.
-    /// </summary>
-    public TimeSpan Timeout
-    {
-        get => TimeSpan.FromSeconds(_engine.Pragma(Pragmas.TIMEOUT).GetAwaiter().GetResult().AsInt32);
-        set => _engine.Pragma(Pragmas.TIMEOUT, (int)value.TotalSeconds).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Get/Set if database will deserialize dates in UTC timezone or Local timezone (default: Local).
-    /// Transitional synchronous bridge; prefer async pragma access via <see cref="Pragma(string, CancellationToken)"/>
-    /// or <see cref="Pragma(string, BsonValue, CancellationToken)"/>.
-    /// </summary>
-    public bool UtcDate
-    {
-        get => _engine.Pragma(Pragmas.UTC_DATE).GetAwaiter().GetResult().AsBoolean;
-        set => _engine.Pragma(Pragmas.UTC_DATE, value).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Get/Set database limit size (in bytes). New value must be equals or larger than current database size.
-    /// Transitional synchronous bridge; prefer async pragma access via <see cref="Pragma(string, CancellationToken)"/>
-    /// or <see cref="Pragma(string, BsonValue, CancellationToken)"/>.
-    /// </summary>
-    public long LimitSize
-    {
-        get => _engine.Pragma(Pragmas.LIMIT_SIZE).GetAwaiter().GetResult().AsInt64;
-        set => _engine.Pragma(Pragmas.LIMIT_SIZE, value).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Get/Set in how many pages (8 Kb each page) log file will auto checkpoint (copy from log file to data file). Use 0 to
-    /// manual-only checkpoint (and no checkpoint on dispose)
-    /// Default: 1000 pages.
-    /// Transitional synchronous bridge; prefer async pragma access via <see cref="Pragma(string, CancellationToken)"/>
-    /// or <see cref="Pragma(string, BsonValue, CancellationToken)"/>.
-    /// </summary>
-    public int CheckpointSize
-    {
-        get => _engine.Pragma(Pragmas.CHECKPOINT).GetAwaiter().GetResult().AsInt32;
-        set => _engine.Pragma(Pragmas.CHECKPOINT, value).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Get database collection (this options can be changed only in rebuild proces).
-    /// Transitional synchronous bridge; prefer async pragma access via <see cref="Pragma(string, CancellationToken)"/>.
-    /// </summary>
-    public Collation Collation
-        => new(_engine.Pragma(Pragmas.COLLATION).GetAwaiter().GetResult().AsString);
-
     // ── ILiteDatabase — Collection factory (sync — no I/O) ───────────────────
 
     /// <summary>
@@ -399,23 +291,4 @@ public class LiteDatabase : ILiteDatabase, IDisposable
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>
-    /// Blocking disposal convenience retained for compatibility. Prefer <see cref="DisposeAsync"/>
-    /// or <c>await using</c> in async-first code.
-    /// </summary>
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    ~LiteDatabase() { Dispose(false); }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (disposing && _disposeOnClose && _engine is IDisposable d)
-        {
-            d.Dispose();
-        }
-    }
 }

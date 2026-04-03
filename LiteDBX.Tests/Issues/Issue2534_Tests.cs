@@ -10,7 +10,7 @@ public class Issue2534_Tests
     {
         using var file = new TempFile();
 
-        await using LiteDatabase database = new(new ConnectionString
+        await using LiteDatabase database = await LiteDatabase.Open(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.Shared

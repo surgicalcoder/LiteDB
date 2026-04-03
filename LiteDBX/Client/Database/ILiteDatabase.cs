@@ -18,10 +18,8 @@ namespace LiteDbX;
 /// Lifecycle:
 /// - Open/create the database with the concrete type's static <c>Open(...)</c> factory.
 /// - Use <c>await using</c> for deterministic async disposal.
-///
-/// The configuration properties below are retained as transitional synchronous bridges over pragma access.
-/// Async-first callers should prefer <see cref="Pragma(string, CancellationToken)"/> and
-/// <see cref="Pragma(string, BsonValue, CancellationToken)"/>.
+/// - Use <see cref="Pragma(string, CancellationToken)"/> and
+///   <see cref="Pragma(string, BsonValue, CancellationToken)"/> for configuration.
 /// </summary>
 public interface ILiteDatabase : IAsyncDisposable
 {
@@ -35,27 +33,6 @@ public interface ILiteDatabase : IAsyncDisposable
     /// </summary>
     ILiteStorage<string> FileStorage { get; }
 
-    /// <summary>User-defined database schema version number. Transitional synchronous bridge over pragma access.</summary>
-    int UserVersion { get; set; }
-
-    /// <summary>Timeout used when waiting for lock acquisition. Transitional synchronous bridge over pragma access.</summary>
-    TimeSpan Timeout { get; set; }
-
-    /// <summary>When <c>true</c>, dates are returned in UTC; otherwise local time. Transitional synchronous bridge over pragma access.</summary>
-    bool UtcDate { get; set; }
-
-    /// <summary>Maximum allowed data file size in bytes. Transitional synchronous bridge over pragma access.</summary>
-    long LimitSize { get; set; }
-
-    /// <summary>
-    /// Number of WAL pages that trigger an auto-checkpoint. Use 0 for manual-only checkpointing.
-    /// Default: 1000.
-    /// Transitional synchronous bridge over pragma access.
-    /// </summary>
-    int CheckpointSize { get; set; }
-
-    /// <summary>Read-only collation used by this database (changeable only via rebuild). Transitional synchronous bridge over pragma access.</summary>
-    Collation Collation { get; }
 
     // ── Collection access (sync factory — returns a handle, no I/O occurs here) ──
 

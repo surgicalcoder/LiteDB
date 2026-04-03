@@ -31,7 +31,7 @@ public class Rebuild_Tests
         async Task DoTest(ILiteDatabase db, ILiteCollection<Zip> col)
         {
             Assert.Equal(1, await col.Count());
-            Assert.Equal(99, db.UserVersion);
+            Assert.Equal(99, (await db.Pragma(Pragmas.USER_VERSION)).AsInt32);
         }
 
         using var file = new TempFile();
@@ -39,7 +39,7 @@ public class Rebuild_Tests
         await using (var db = await LiteDatabase.Open(file.Filename))
         {
             var col = db.GetCollection<Zip>();
-            db.UserVersion = 99;
+            await db.Pragma(Pragmas.USER_VERSION, 99);
             await col.EnsureIndex("city");
 
             var inserted = await col.Insert(DataGen.Zip()); // 29.353 docs

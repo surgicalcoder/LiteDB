@@ -14,14 +14,14 @@ public class UserVersion_Tests
 
         await using (var db = await LiteDatabase.Open(file.Filename))
         {
-            db.UserVersion.Should().Be(0);
-            db.UserVersion = 5;
+            (await db.Pragma(Pragmas.USER_VERSION)).AsInt32.Should().Be(0);
+            await db.Pragma(Pragmas.USER_VERSION, 5);
             await db.Checkpoint();
         }
 
         await using (var db = await LiteDatabase.Open(file.Filename))
         {
-            db.UserVersion.Should().Be(5);
+            (await db.Pragma(Pragmas.USER_VERSION)).AsInt32.Should().Be(5);
         }
     }
 }
