@@ -252,9 +252,54 @@ public partial class BsonMapper
                 continue;
             }
 
-            doc[member.FieldName] = SerializeMemberValue(member, value, depth);
+            var serializedValue = SerializeMemberValue(member, value, depth);
+
+            if (ShouldSkipEmptyCollectionMember(member, value, serializedValue))
+            {
+                continue;
+            }
+
+            doc[member.FieldName] = serializedValue;
         }
 
         return doc;
+    }
+
+    private bool ShouldSkipEmptyCollectionMember(MemberMapper member, object value, BsonValue serializedValue)
+    {
+        if (!DontSerializeEmptyCollections || member == null || value == null)
+        {
+            return false;
+        }
+
+        if (value is string)
+        {
+            return false;
+        }
+
+        var isDictionary = Reflection.IsDictionary(member.DataType);
+        var isEnumerable = member.IsEnumerable || Reflection.IsEnumerable(member.DataType);
+
+        if (!isDictionary && !isEnumerable)
+        {
+            return false;
+        }
+
+        if (serializedValue == null || serializedValue.IsNull)
+        {
+            return false;
+        }
+
+        if (serializedValue.IsArray)
+        {
+            return serializedValue.AsArray.Count == 0;
+        }
+
+        if (isDictionary && serializedValue.IsDocument)
+        {
+            return serializedValue.AsDocument.Count == 0;
+        }
+
+        return false;
     }
 }

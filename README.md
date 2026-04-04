@@ -87,6 +87,42 @@ await foreach (var row in customers.Find(x => x.IsActive))
 }
 ```
 
+## Mapper options
+
+`BsonMapper` exposes serialization switches that let you tune document shape.
+Two useful examples are:
+
+- `EmptyStringToNull` - converts empty strings to BSON `null`
+- `DontSerializeEmptyCollections` - omits empty collection members from serialized documents
+
+```csharp
+var mapper = new BsonMapper
+{
+    EmptyStringToNull = true,
+    DontSerializeEmptyCollections = true
+};
+
+var doc = mapper.ToDocument(new
+{
+    Name = "",
+    Tags = new string[0],
+    Scores = new Dictionary<string, int>()
+});
+```
+
+With `DontSerializeEmptyCollections = true`:
+
+- empty array/list members are omitted from the document
+- empty dictionary members are omitted from the document
+- top-level collection serialization is unchanged, so `mapper.Serialize(new List<int>())` still produces `[]`
+- strings are not treated as collections
+
+`SerializeNullValues` still controls `null` member handling:
+
+- if `SerializeNullValues = false`, `null` members are omitted
+- if `SerializeNullValues = true`, `null` members are written as BSON `null`
+- empty collections are still omitted when `DontSerializeEmptyCollections = true`
+
 ## Explicit async transactions
 
 LiteDbX no longer centers transactions around thread affinity.

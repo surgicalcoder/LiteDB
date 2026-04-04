@@ -27,6 +27,7 @@ public partial class BsonMapper
         SerializeNullValues = false;
         TrimWhitespace = true;
         EmptyStringToNull = true;
+        DontSerializeEmptyCollections = false;
         EnumAsInteger = false;
         ResolveFieldName = s => s;
         ResolveMember = (t, mi, mm) => { };
@@ -107,6 +108,12 @@ public partial class BsonMapper
     /// Convert EmptyString to Null (default true)
     /// </summary>
     public bool EmptyStringToNull { get; set; }
+
+    /// <summary>
+    /// Do not serialize empty collection members into documents (default false).
+    /// Top-level collection serialization is not affected.
+    /// </summary>
+    public bool DontSerializeEmptyCollections { get; set; }
 
     /// <summary>
     /// Get/Set if enum must be converted into Integer value. If false, enum will be converted into String value.
