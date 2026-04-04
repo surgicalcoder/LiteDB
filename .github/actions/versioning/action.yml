@@ -1,0 +1,128 @@
+name: "Semantic Versioning"
+description: "Semver + conventional commits + prerelease (PowerShell)"
+
+inputs:
+  prerelease:
+    description: "Prerelease identifier"
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: "The calculated semantic version"
+    value: ${{ steps.version.outputs.version }}
+  version_tag:
+    description: "The calculated semantic version with 'v' prefix"
+    value: ${{ steps.version.outputs.version_tag }}
+  is_prerelease:
+    description: "Whether the version is a prerelease"
+    value: ${{ steps.version.outputs.is_prerelease }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Fetch tags
+      shell: pwsh
+      run: git fetch --tags --force
+
+    - name: Get latest tag
+      id: tag
+      shell: pwsh
+      run: |
+        try {
+          $tag = git describe --tags --abbrev=0
+        } catch {
+          $tag = "v0.0.0"
+        }
+
+        "tag=$tag" >> $env:GITHUB_OUTPUT
+
+    - name: Get commits
+      id: history
+      shell: pwsh
+      run: |
+        $last = "${{ steps.tag.outputs.tag }}"
+
+        if ($last -eq "v0.0.0") {
+          $log = git log --pretty=format:%s
+        } else {
+          $log = git log "$last..HEAD" --pretty=format:%s
+        }
+
+        $logText = $log -join "`n"
+
+        "log<<EOF" >> $env:GITHUB_OUTPUT
+        $logText >> $env:GITHUB_OUTPUT
+        "EOF" >> $env:GITHUB_OUTPUT
+
+    - name: Determine bump
+      id: bump
+      shell: pwsh
+      run: |
+        $log = "${{ steps.history.outputs.log }}"
+        $bump = "patch"
+
+        if ($log -match "BREAKING CHANGE") {
+          $bump = "major"
+        }
+        elseif ($log -match "^[a-z]+(\(.+\))?!:") {
+          $bump = "major"
+        }
+        elseif ($log -match "^major") {
+          $bump = "major"
+        }
+        elseif ($log -match "^feat") {
+          $bump = "minor"
+        }
+        elseif ($log -match "^minor") {
+          $bump = "minor"
+        }
+
+        "bump=$bump" >> $env:GITHUB_OUTPUT
+
+    - name: Calculate version
+      id: version
+      shell: pwsh
+      run: |
+        $tag = "${{ steps.tag.outputs.tag }}".TrimStart('v')
+
+        $parts = $tag.Split('.')
+        $major = [int]$parts[0]
+        $minor = [int]$parts[1]
+        $patch = [int]$parts[2]
+
+        switch ("${{ steps.bump.outputs.bump }}") {
+          "major" { $major++; $minor = 0; $patch = 0 }
+          "minor" { $minor++; $patch = 0 }
+          default { $patch++ }
+        }
+
+        $base = "$major.$minor.$patch"
+        $pre = "${{ inputs.prerelease }}"
+
+        if (![string]::IsNullOrWhiteSpace($pre)) {
+          $version = "$base-$pre"
+          $isPre = "true"
+        } else {
+          $version = $base
+          $isPre = "false"
+        }
+
+        "version=$version" >> $env:GITHUB_OUTPUT
+        "version_tag=v$version" >> $env:GITHUB_OUTPUT
+        "is_prerelease=$isPre" >> $env:GITHUB_OUTPUT
+
+    - name: Generate changelog
+      shell: pwsh
+      run: |
+        $version = "${{ steps.version.outputs.version }}"
+        $date = Get-Date -Format "yyyy-MM-dd"
+
+        $log = git log -20 --pretty=format:%s
+
+        $content = @()
+        $content += "## v$version ($date)"
+        $content += ""
+        $content += $log
+
+        $content | Out-File CHANGELOG.md -Encoding utf8

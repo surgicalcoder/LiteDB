@@ -1,0 +1,162 @@
+name: Build & Publish
+
+on:
+  push:
+    branches: [ main, develop ]
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  OUTPUT: './artifacts'
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # -------------------------
+      # Skip logic
+      # -------------------------
+      - name: Check skip
+        id: skip
+        shell: pwsh
+        run: |
+          $msg = git log -1 --pretty=%s
+
+          if ($msg -match "^(docs|nobuild):") {
+            "skip=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "skip=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - if: steps.skip.outputs.skip == 'true'
+        run: exit 0
+
+      # -------------------------
+      # Prerelease strategy
+      # -------------------------
+      - name: Set prerelease
+        id: pre
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -eq "refs/heads/main") {
+            "type=" >> $env:GITHUB_OUTPUT
+          }
+          elseif ($env:GITHUB_REF -eq "refs/heads/develop") {
+            "type=dev" >> $env:GITHUB_OUTPUT
+          }
+          else {
+            "type=alpha" >> $env:GITHUB_OUTPUT
+          }
+
+      # -------------------------
+      # Versioning
+      # -------------------------
+      - name: Version
+        id: version
+        uses: ./.github/actions/versioning
+        with:
+          prerelease: ${{ steps.pre.outputs.type }}
+
+      # -------------------------
+      # Restore + Build solution
+      # -------------------------
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet build `
+            -c Release `
+            -p:Version=${{ steps.version.outputs.version }}
+
+      # -------------------------
+      # Find packable projects
+      # -------------------------
+      - name: Find packable projects
+        id: packable
+        shell: pwsh
+        run: |
+          $projects = Get-ChildItem -Recurse -Filter *.csproj
+          $packable = @()
+
+          foreach ($proj in $projects) {
+              $content = Get-Content $proj.FullName -Raw
+
+              if ($content -notmatch "<IsPackable>\s*false\s*</IsPackable>") {
+                  $packable += $proj.FullName
+              }
+          }
+
+          $result = $packable -join "`n"
+
+          "projects<<EOF" >> $env:GITHUB_OUTPUT
+          $result >> $env:GITHUB_OUTPUT
+          "EOF" >> $env:GITHUB_OUTPUT
+
+      # -------------------------
+      # Pack ALL packable projects
+      # -------------------------
+      - name: Pack
+        shell: pwsh
+        run: |
+          $projects = "${{ steps.packable.outputs.projects }}" -split "`n" | Where-Object { $_ }
+
+          $version = "${{ steps.version.outputs.version }}"
+
+          if ("${{ steps.version.outputs.is_prerelease }}" -eq "true") {
+            $timestamp = Get-Date -Format "yyyyMMddHHmm"
+            $version = "$version+$timestamp"
+          }
+
+          foreach ($proj in $projects) {
+              Write-Host "Packing $proj"
+
+              dotnet pack $proj `
+                -c Release `
+                --no-build `
+                -p:PackageVersion=$version `
+                -o $env:OUTPUT
+          }
+
+      # -------------------------
+      # Publish NuGet
+      # -------------------------
+      - name: Publish
+        shell: pwsh
+        run: |
+          dotnet nuget push "$env:OUTPUT\*.nupkg" `
+            --api-key "${{ secrets.NUGET_API_KEY }}" `
+            --source "https://api.nuget.org/v3/index.json" `
+            --skip-duplicate
+
+      # -------------------------
+      # Tag + Release (stable only)
+      # -------------------------
+      - name: Tag
+        if: steps.version.outputs.is_prerelease != 'true'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git tag ${{ steps.version.outputs.version_tag }}
+          git push origin --tags
+
+      - name: Release
+        if: steps.version.outputs.is_prerelease != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version_tag }}
+          name: Release ${{ steps.version.outputs.version }}
+          body_path: CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
