@@ -32,7 +32,7 @@ runs:
         try {
           $tag = git describe --tags --abbrev=0
         } catch {
-          $tag = "v0.0.0"
+          $tag = "v1.0.0"
         }
 
         "tag=$tag" >> $env:GITHUB_OUTPUT
@@ -43,7 +43,7 @@ runs:
       run: |
         $last = "${{ steps.tag.outputs.tag }}"
 
-        if ($last -eq "v0.0.0") {
+        if ($last -eq "v1.0.0") {
           $log = git log --pretty=format:%s
         } else {
           $log = git log "$last..HEAD" --pretty=format:%s
