@@ -29,9 +29,15 @@ runs:
       id: tag
       shell: pwsh
       run: |
-        $tag = git describe --tags --abbrev=0 2>$null
+        $previousNativeCommandBehavior = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
 
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tag)) {
+        $tag = git describe --tags --abbrev=0 2>$null
+        $describeExitCode = $LASTEXITCODE
+
+        $PSNativeCommandUseErrorActionPreference = $previousNativeCommandBehavior
+
+        if ($describeExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($tag)) {
           $tag = "v1.0.0"
         }
 
