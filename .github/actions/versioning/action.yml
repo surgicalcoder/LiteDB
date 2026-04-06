@@ -29,7 +29,8 @@ runs:
       id: tag
       shell: pwsh
       run: |
-        $tag = git tag --sort=-version:refname | Select-Object -First 1
+        $allTags = @(git tag --sort=-version:refname)
+        $tag = if ($allTags.Count -gt 0) { $allTags[0] } else { $null }
 
         if ([string]::IsNullOrWhiteSpace($tag)) {
           $tag = "v1.0.0"
