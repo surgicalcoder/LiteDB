@@ -29,17 +29,16 @@ runs:
       id: tag
       shell: pwsh
       run: |
-        $PSNativeCommandUseErrorActionPreference = $false
+        $tag = git tag --sort=-version:refname | Select-Object -First 1
 
-        $tag = git describe --tags --abbrev=0 2>$null
-        $noTag = $LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tag)
-
-        if ($noTag) {
+        if ([string]::IsNullOrWhiteSpace($tag)) {
           $tag = "v1.0.0"
+          "no_tag=true" >> $env:GITHUB_OUTPUT
+        } else {
+          "no_tag=false" >> $env:GITHUB_OUTPUT
         }
 
         "tag=$tag" >> $env:GITHUB_OUTPUT
-        "no_tag=$($noTag.ToString().ToLower())" >> $env:GITHUB_OUTPUT
 
     - name: Get commits
       id: history
