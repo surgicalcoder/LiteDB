@@ -86,7 +86,8 @@ jobs:
         id: packable
         shell: pwsh
         run: |
-          $projects = Get-ChildItem -Recurse -Filter *.csproj
+          $projects = Get-ChildItem -Recurse -Filter *.csproj |
+            Where-Object { $_.FullName -notmatch '\\(obj|bin)\\' }
           $packable = @()
 
           foreach ($proj in $projects) {
@@ -109,7 +110,7 @@ jobs:
       - name: Pack
         shell: pwsh
         run: |
-          $projects = "${{ steps.packable.outputs.projects }}" -split "`n" | Where-Object { $_ }
+          $projects = "${{ steps.packable.outputs.projects }}" -split "`n" | Where-Object { $_ } | ForEach-Object { $_.Trim() }
 
           $version = "${{ steps.version.outputs.version }}"
 
@@ -134,7 +135,8 @@ jobs:
       - name: Publish
         shell: pwsh
         run: |
-          dotnet nuget push "$env:OUTPUT\*.nupkg" `
+          $nupkgs = Join-Path $env:OUTPUT '*.nupkg'
+          dotnet nuget push $nupkgs `
             --api-key "${{ secrets.NUGET_API_KEY }}" `
             --source "https://api.nuget.org/v3/index.json" `
             --skip-duplicate
