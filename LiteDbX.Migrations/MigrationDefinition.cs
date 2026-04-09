@@ -20,15 +20,15 @@ internal sealed class MigrationDefinition
 
 internal sealed class CollectionMigrationDefinition
 {
-    public CollectionMigrationDefinition(string selector, IReadOnlyList<IDocumentMigrationOperation> operations)
+    public CollectionMigrationDefinition(string selector, CollectionMigrationPlan plan)
     {
         Selector = string.IsNullOrWhiteSpace(selector) ? throw new ArgumentNullException(nameof(selector)) : selector;
-        Operations = operations ?? throw new ArgumentNullException(nameof(operations));
+        Plan = plan ?? throw new ArgumentNullException(nameof(plan));
     }
 
     public string Selector { get; }
 
-    public IReadOnlyList<IDocumentMigrationOperation> Operations { get; }
+    public CollectionMigrationPlan Plan { get; }
 }
 
 public sealed class MigrationReport
@@ -43,25 +43,31 @@ public sealed class MigrationReport
 
 public sealed class MigrationExecutionResult
 {
-    internal MigrationExecutionResult(string name, string runId, bool wasApplied, IReadOnlyList<CollectionSelectorResult> selectors, int documentsScanned, int documentsModified, int generatedIdMappings)
+    internal MigrationExecutionResult(string name, string runId, bool wasApplied, bool isDryRun, IReadOnlyList<CollectionSelectorResult> selectors, int documentsScanned, int documentsModified, int documentsRemoved, int generatedIdMappings, int repairedReferences)
     {
         Name = name;
         RunId = runId;
         WasApplied = wasApplied;
+        IsDryRun = isDryRun;
         Selectors = selectors;
         DocumentsScanned = documentsScanned;
         DocumentsModified = documentsModified;
+        DocumentsRemoved = documentsRemoved;
         GeneratedIdMappings = generatedIdMappings;
+        RepairedReferences = repairedReferences;
     }
 
     public string Name { get; }
     public string RunId { get; }
     public bool WasApplied { get; }
-    public bool WasSkipped => !WasApplied;
+    public bool IsDryRun { get; }
+    public bool WasSkipped => !WasApplied && !IsDryRun;
     public IReadOnlyList<CollectionSelectorResult> Selectors { get; }
     public int DocumentsScanned { get; }
     public int DocumentsModified { get; }
+    public int DocumentsRemoved { get; }
     public int GeneratedIdMappings { get; }
+    public int RepairedReferences { get; }
 }
 
 public sealed class CollectionSelectorResult
@@ -81,16 +87,26 @@ public sealed class CollectionSelectorResult
 
 public sealed class CollectionMigrationResult
 {
-    internal CollectionMigrationResult(string collectionName, int documentsScanned, int documentsModified)
+    internal CollectionMigrationResult(string collectionName, int documentsScanned, int documentsModified, int documentsRemoved, int generatedIdMappings, int repairedReferences, string backupCollectionName, BackupDisposition backupDisposition)
     {
         CollectionName = collectionName;
         DocumentsScanned = documentsScanned;
         DocumentsModified = documentsModified;
+        DocumentsRemoved = documentsRemoved;
+        GeneratedIdMappings = generatedIdMappings;
+        RepairedReferences = repairedReferences;
+        BackupCollectionName = backupCollectionName;
+        BackupDisposition = backupDisposition;
     }
 
     public string CollectionName { get; }
     public int DocumentsScanned { get; }
     public int DocumentsModified { get; }
+    public int DocumentsRemoved { get; }
+    public int GeneratedIdMappings { get; }
+    public int RepairedReferences { get; }
+    public string BackupCollectionName { get; }
+    public BackupDisposition BackupDisposition { get; }
 }
 
 public sealed class MigrationBuilder

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -39,6 +40,28 @@ public sealed class IdRemapLog
         };
 
         return _collection.Insert(doc, cancellationToken);
+    }
+
+    public async ValueTask<Dictionary<string, ObjectId>> ReadMappingsAsync(string sourceCollection, string sourceMigrationName = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceCollection)) throw new ArgumentNullException(nameof(sourceCollection));
+
+        var mappings = new Dictionary<string, ObjectId>(StringComparer.Ordinal);
+        var query = _collection.Query().Where("sourceCollection = @0", new BsonValue(sourceCollection));
+
+        if (!string.IsNullOrWhiteSpace(sourceMigrationName))
+        {
+            query = query.Where("migrationName = @0", new BsonValue(sourceMigrationName));
+        }
+
+        await foreach (var doc in query.ToDocuments(cancellationToken).ConfigureAwait(false))
+        {
+            var type = (BsonType)Enum.Parse(typeof(BsonType), doc["oldIdType"].AsString);
+            var key = DocumentMigrationExecutionContext.BuildIdKey(doc["oldIdRaw"].AsString, type);
+            mappings[key] = doc["newObjectId"].AsObjectId;
+        }
+
+        return mappings;
     }
 }
 

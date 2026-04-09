@@ -14,6 +14,7 @@ Your task is to implement a new migration package called `LiteDbX.Migrations` an
 - `docs/migration-cleanup/02-nested-paths-and-array-cleanup.md`
 - `docs/migration-cleanup/03-bson-predicates-catalog.md`
 - `docs/migration-cleanup/04-mutation-primitives.md`
+- `docs/migration-cleanup/05-operational-safety.md`
 
 ## Context
 

@@ -4,6 +4,16 @@ namespace LiteDbX.Migrations;
 
 public static class BsonPathNavigator
 {
+    public static bool PathsConflict(string sourcePath, string targetPath)
+    {
+        if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return IsAncestorOrDescendant(sourcePath, targetPath) || IsAncestorOrDescendant(targetPath, sourcePath);
+    }
+
     public static bool TryGet(BsonDocument document, string path, out BsonDocument parent, out string fieldName, out BsonValue value)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
@@ -119,6 +129,76 @@ public static class BsonPathNavigator
         return true;
     }
 
+    public static BsonValue CloneValue(BsonValue value)
+    {
+        if (value == null || value.IsNull)
+        {
+            return BsonValue.Null;
+        }
+
+        if (value.IsDocument)
+        {
+            var clone = new BsonDocument();
+
+            foreach (var element in value.AsDocument)
+            {
+                clone[element.Key] = CloneValue(element.Value);
+            }
+
+            return clone;
+        }
+
+        if (value.IsArray)
+        {
+            var clone = new BsonArray();
+
+            foreach (var item in value.AsArray)
+            {
+                clone.Add(CloneValue(item));
+            }
+
+            return clone;
+        }
+
+        if (value.IsBinary)
+        {
+            var bytes = value.AsBinary;
+            var copy = new byte[bytes.Length];
+            Array.Copy(bytes, copy, bytes.Length);
+            return new BsonValue(copy);
+        }
+
+        switch (value.Type)
+        {
+            case BsonType.Int32:
+                return new BsonValue(value.AsInt32);
+            case BsonType.Int64:
+                return new BsonValue(value.AsInt64);
+            case BsonType.Double:
+                return new BsonValue(value.AsDouble);
+            case BsonType.Decimal:
+                return new BsonValue(value.AsDecimal);
+            case BsonType.String:
+                return new BsonValue(value.AsString);
+            case BsonType.ObjectId:
+                return new BsonValue(new ObjectId(value.AsObjectId));
+            case BsonType.Guid:
+                return new BsonValue(value.AsGuid);
+            case BsonType.Boolean:
+                return new BsonValue(value.AsBoolean);
+            case BsonType.DateTime:
+                return new BsonValue(value.AsDateTime);
+            case BsonType.Null:
+                return BsonValue.Null;
+            case BsonType.MinValue:
+                return BsonValue.MinValue;
+            case BsonType.MaxValue:
+                return BsonValue.MaxValue;
+            default:
+                throw new NotSupportedException($"Unsupported BSON type '{value.Type}' for cloning.");
+        }
+    }
+
     private static void PruneEmptyParents(BsonDocument document, string path)
     {
         var segments = path.Split('.');
@@ -139,6 +219,16 @@ public static class BsonPathNavigator
 
             parent?.Remove(fieldName);
         }
+    }
+
+    private static bool IsAncestorOrDescendant(string candidateAncestor, string candidateDescendant)
+    {
+        if (candidateAncestor.Length >= candidateDescendant.Length)
+        {
+            return false;
+        }
+
+        return candidateDescendant.StartsWith(candidateAncestor + ".", StringComparison.OrdinalIgnoreCase);
     }
 }
 

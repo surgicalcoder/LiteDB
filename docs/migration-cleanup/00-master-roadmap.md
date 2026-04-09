@@ -15,6 +15,8 @@ It should also support conditional field enrichment and transformation, not only
 
 It must also support applying the same migration definition to one collection, many collections, or collection-name patterns.
 
+The implemented baseline now also includes whole-document mutation and durable reference repair. The next operational slice should focus on preview and backup-control features.
+
 ---
 
 ## Core design decisions
@@ -481,6 +483,16 @@ Deliver:
 - optional shell integration or sample host
 - end-to-end docs and examples
 
+## Stage 6 - operational safety
+
+Deliver:
+
+- `MigrationRunOptions`
+- dry-run execution with no writes, no journal entries, and no remap persistence
+- backup retention policy for rebuild/swap migrations
+- backup disposition metadata in reports
+- duplicate target `_id` validation surfaced in preview and execution
+
 ---
 
 ## Test matrix
@@ -526,6 +538,12 @@ Deliver:
 - `ForCollection("*")` resolves all user collections but excludes system/migration collections by default
 - prefix/suffix/infix selectors resolve deterministically
 - unmatched selectors are reported without crashing the whole run unless strict mode is enabled
+
+### Operational safety
+
+- dry-run reports changes without mutating data or writing history/remap rows
+- rebuild dry-run reports planned backup names/dispositions without creating backup/shadow collections
+- backup retention policy behaves correctly after successful swaps
 
 ---
 
