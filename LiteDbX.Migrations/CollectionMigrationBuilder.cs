@@ -21,6 +21,43 @@ public delegate bool BsonDocumentPredicate(BsonDocument document, BsonDocumentMu
 
 public delegate BsonDocument BsonDocumentMutator(BsonDocument document, BsonDocumentMutationContext context);
 
+public enum CleanupScope
+{
+    TopLevel,
+    Recursive
+}
+
+public enum FieldWriteMode
+{
+    MissingOnly,
+    ExistingOnly,
+    NullOrMissing,
+    Overwrite
+}
+
+public sealed class FieldMutationOptions
+{
+    public bool CreateParents { get; set; }
+
+    public FieldWriteMode? WriteMode { get; set; }
+}
+
+internal readonly struct ResolvedFieldMutationOptions
+{
+    public ResolvedFieldMutationOptions(bool createParents, FieldWriteMode writeMode)
+    {
+        CreateParents = createParents;
+        WriteMode = writeMode;
+    }
+
+    public bool CreateParents { get; }
+
+    public FieldWriteMode WriteMode { get; }
+
+    public static ResolvedFieldMutationOptions Resolve(FieldMutationOptions options, FieldWriteMode defaultWriteMode)
+        => new(options?.CreateParents ?? false, options?.WriteMode ?? defaultWriteMode);
+}
+
 public sealed class CollectionMigrationBuilder
 {
     private readonly List<IDocumentMigrationOperation> _operations = new();
@@ -43,31 +80,54 @@ public sealed class CollectionMigrationBuilder
         return this;
     }
 
+    public CollectionMigrationBuilder RemoveWhere(BsonPredicate when, CleanupScope scope = CleanupScope.TopLevel)
+    {
+        if (when == null) throw new ArgumentNullException(nameof(when));
+
+        _operations.Add(new RemoveWhereOperation(when, scope));
+        return this;
+    }
+
+    public CollectionMigrationBuilder PruneEmptyContainers(CleanupScope scope = CleanupScope.Recursive)
+        => RemoveWhere(BsonPredicates.StructurallyEmpty, scope);
+
     public CollectionMigrationBuilder AddFieldWhen(string path, BsonValueFactory factory, BsonPredicate when)
+        => AddFieldWhen(path, factory, when, options: null);
+
+    public CollectionMigrationBuilder AddFieldWhen(string path, BsonValueFactory factory, BsonPredicate when, FieldMutationOptions options)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
         if (factory == null) throw new ArgumentNullException(nameof(factory));
         if (when == null) throw new ArgumentNullException(nameof(when));
 
-        _operations.Add(new AddFieldWhenOperation(path, factory, when));
+        _operations.Add(new AddFieldWhenOperation(path, factory, when, ResolvedFieldMutationOptions.Resolve(options, FieldWriteMode.MissingOnly)));
         return this;
     }
 
     public CollectionMigrationBuilder AddFieldWhen(string path, BsonValue value, BsonPredicate when)
+        => AddFieldWhen(path, value, when, options: null);
+
+    public CollectionMigrationBuilder AddFieldWhen(string path, BsonValue value, BsonPredicate when, FieldMutationOptions options)
     {
         if (when == null) throw new ArgumentNullException(nameof(when));
-        return AddFieldWhen(path, _ => value ?? BsonValue.Null, when);
+        return AddFieldWhen(path, _ => value ?? BsonValue.Null, when, options);
     }
 
     public CollectionMigrationBuilder SetDefaultWhenMissing(string path, BsonValueFactory factory)
+        => SetDefaultWhenMissing(path, factory, options: null);
+
+    public CollectionMigrationBuilder SetDefaultWhenMissing(string path, BsonValueFactory factory, FieldMutationOptions options)
     {
         if (factory == null) throw new ArgumentNullException(nameof(factory));
-        return AddFieldWhen(path, factory, BsonPredicates.Missing);
+        return AddFieldWhen(path, factory, BsonPredicates.Missing, options);
     }
 
     public CollectionMigrationBuilder SetDefaultWhenMissing(string path, BsonValue value)
+        => SetDefaultWhenMissing(path, value, options: null);
+
+    public CollectionMigrationBuilder SetDefaultWhenMissing(string path, BsonValue value, FieldMutationOptions options)
     {
-        return AddFieldWhen(path, value, BsonPredicates.Missing);
+        return AddFieldWhen(path, value, BsonPredicates.Missing, options);
     }
 
     public ReferenceRepairBuilder RepairReference(string path)
@@ -97,19 +157,25 @@ public sealed class CollectionMigrationBuilder
     }
 
     public CollectionMigrationBuilder SetFieldWhen(string path, BsonValueFactory factory, BsonPredicate when)
+        => SetFieldWhen(path, factory, when, options: null);
+
+    public CollectionMigrationBuilder SetFieldWhen(string path, BsonValueFactory factory, BsonPredicate when, FieldMutationOptions options)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
         if (factory == null) throw new ArgumentNullException(nameof(factory));
         if (when == null) throw new ArgumentNullException(nameof(when));
 
-        _operations.Add(new SetFieldWhenOperation(path, factory, when));
+        _operations.Add(new SetFieldWhenOperation(path, factory, when, ResolvedFieldMutationOptions.Resolve(options, FieldWriteMode.Overwrite)));
         return this;
     }
 
     public CollectionMigrationBuilder SetFieldWhen(string path, BsonValue value, BsonPredicate when)
+        => SetFieldWhen(path, value, when, options: null);
+
+    public CollectionMigrationBuilder SetFieldWhen(string path, BsonValue value, BsonPredicate when, FieldMutationOptions options)
     {
         if (when == null) throw new ArgumentNullException(nameof(when));
-        return SetFieldWhen(path, _ => value ?? BsonValue.Null, when);
+        return SetFieldWhen(path, _ => value ?? BsonValue.Null, when, options);
     }
 
     public CollectionMigrationBuilder RenameField(string sourcePath, string targetPath)
@@ -281,7 +347,8 @@ internal interface IDocumentMigrationOperation
 internal enum DocumentOperationStage
 {
     PreId,
-    PostId
+    PostId,
+    FinalCleanup
 }
 
 internal enum DocumentOperationKind
@@ -379,17 +446,65 @@ internal sealed class RemoveDocumentWhenOperation : IDocumentMigrationOperation
     }
 }
 
+internal sealed class RemoveWhereOperation : IDocumentMigrationOperation
+{
+    private readonly BsonPredicate _when;
+    private readonly CleanupScope _scope;
+
+    public RemoveWhereOperation(BsonPredicate when, CleanupScope scope)
+    {
+        _when = when;
+        _scope = scope;
+    }
+
+    public DocumentOperationStage Stage => DocumentOperationStage.FinalCleanup;
+
+    public DocumentOperationResult Apply(BsonDocument document, DocumentMigrationExecutionContext context)
+    {
+        var changed = false;
+
+        do
+        {
+            var passChanged = false;
+            var cleanupContexts = BsonPathNavigator.CreateCleanupContexts(document, _scope, context.CollectionName, context.MigrationName);
+
+            for (var i = 0; i < cleanupContexts.Count; i++)
+            {
+                var cleanupContext = cleanupContexts[i];
+
+                if (!cleanupContext.Exists || !_when(cleanupContext))
+                {
+                    continue;
+                }
+
+                passChanged |= BsonPathNavigator.TryRemove(document, cleanupContext.Path, pruneEmptyParents: false);
+            }
+
+            changed |= passChanged;
+
+            if (_scope != CleanupScope.Recursive || !passChanged)
+            {
+                break;
+            }
+        } while (true);
+
+        return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
+    }
+}
+
 internal sealed class AddFieldWhenOperation : IDocumentMigrationOperation
 {
     private readonly string _path;
     private readonly BsonValueFactory _factory;
     private readonly BsonPredicate _when;
+    private readonly ResolvedFieldMutationOptions _options;
 
-    public AddFieldWhenOperation(string path, BsonValueFactory factory, BsonPredicate when)
+    public AddFieldWhenOperation(string path, BsonValueFactory factory, BsonPredicate when, ResolvedFieldMutationOptions options)
     {
         _path = path;
         _factory = factory;
         _when = when;
+        _options = options;
     }
 
     public DocumentOperationStage Stage => DocumentOperationStage.PostId;
@@ -416,7 +531,7 @@ internal sealed class AddFieldWhenOperation : IDocumentMigrationOperation
                 }
 
                 var wildcardValue = _factory(wildcardContext) ?? BsonValue.Null;
-                changed |= BsonPathNavigator.TryAdd(document, wildcardContext.Path, wildcardValue, overwrite: false);
+                changed |= BsonPathNavigator.TryAdd(document, wildcardContext.Path, wildcardValue, _options.WriteMode, _options.CreateParents);
             }
 
             return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
@@ -431,7 +546,7 @@ internal sealed class AddFieldWhenOperation : IDocumentMigrationOperation
 
         var newValue = _factory(predicateContext) ?? BsonValue.Null;
 
-        return BsonPathNavigator.TryAdd(document, _path, newValue, overwrite: false)
+        return BsonPathNavigator.TryAdd(document, _path, newValue, _options.WriteMode, _options.CreateParents)
             ? DocumentOperationResult.Updated()
             : DocumentOperationResult.NoChange();
     }
@@ -531,12 +646,14 @@ internal sealed class SetFieldWhenOperation : IDocumentMigrationOperation
     private readonly string _path;
     private readonly BsonValueFactory _factory;
     private readonly BsonPredicate _when;
+    private readonly ResolvedFieldMutationOptions _options;
 
-    public SetFieldWhenOperation(string path, BsonValueFactory factory, BsonPredicate when)
+    public SetFieldWhenOperation(string path, BsonValueFactory factory, BsonPredicate when, ResolvedFieldMutationOptions options)
     {
         _path = path;
         _factory = factory;
         _when = when;
+        _options = options;
     }
 
     public DocumentOperationStage Stage => DocumentOperationStage.PostId;
@@ -563,7 +680,7 @@ internal sealed class SetFieldWhenOperation : IDocumentMigrationOperation
                 }
 
                 var wildcardValue = _factory(wildcardContext) ?? BsonValue.Null;
-                changed |= BsonPathNavigator.TryAdd(document, wildcardContext.Path, wildcardValue, overwrite: true);
+                changed |= BsonPathNavigator.TryAdd(document, wildcardContext.Path, wildcardValue, _options.WriteMode, _options.CreateParents);
             }
 
             return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
@@ -578,7 +695,7 @@ internal sealed class SetFieldWhenOperation : IDocumentMigrationOperation
 
         var newValue = _factory(predicateContext) ?? BsonValue.Null;
 
-        return BsonPathNavigator.TryAdd(document, _path, newValue, overwrite: true)
+        return BsonPathNavigator.TryAdd(document, _path, newValue, _options.WriteMode, _options.CreateParents)
             ? DocumentOperationResult.Updated()
             : DocumentOperationResult.NoChange();
     }

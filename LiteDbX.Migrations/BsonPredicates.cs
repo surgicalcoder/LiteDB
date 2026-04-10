@@ -13,6 +13,7 @@ public static class BsonPredicates
     public static readonly BsonPredicate EmptyDocument = context => context.Exists && context.Value.IsDocument && context.Value.AsDocument.Count == 0;
     public static readonly BsonPredicate EmptyString = context => context.Exists && context.Value.IsString && context.Value.AsString.Length == 0;
     public static readonly BsonPredicate WhiteSpaceString = context => context.Exists && context.Value.IsString && string.IsNullOrWhiteSpace(context.Value.AsString);
+    public static readonly BsonPredicate TrimmedEmptyString = context => context.Exists && context.Value.IsString && context.Value.AsString.Trim().Length == 0;
     public static readonly BsonPredicate NullOrWhiteSpaceString = Or(NullOrMissing, WhiteSpaceString);
     public static readonly BsonPredicate IsString = context => context.Exists && context.Value.IsString;
     public static readonly BsonPredicate IsArray = context => context.Exists && context.Value.IsArray;
@@ -23,11 +24,15 @@ public static class BsonPredicates
     public static readonly BsonPredicate IsNumber = context => context.Exists && context.Value.IsNumber;
     public static readonly BsonPredicate ZeroNumber = context => context.Exists && context.Value.IsNumber && context.Value.CompareTo(new BsonValue(0)) == 0;
     public static readonly BsonPredicate FalseBoolean = context => context.Exists && context.Value.IsBoolean && context.Value.AsBoolean == false;
+    public static readonly BsonPredicate MinValue = context => context.Exists && context.Value.Type == BsonType.MinValue;
+    public static readonly BsonPredicate MaxValue = context => context.Exists && context.Value.Type == BsonType.MaxValue;
     public static readonly BsonPredicate EmptyBinary = context => context.Exists && context.Value.IsBinary && context.Value.AsBinary.Length == 0;
     public static readonly BsonPredicate EmptyGuid = context => context.Exists && context.Value.IsGuid && context.Value.AsGuid == Guid.Empty;
     public static readonly BsonPredicate EmptyObjectId = context => context.Exists && context.Value.IsObjectId && context.Value.AsObjectId == ObjectId.Empty;
     public static readonly BsonPredicate NullLike = Or(NullOrMissing, EmptyString, WhiteSpaceString);
     public static readonly BsonPredicate StructurallyEmpty = Or(EmptyArray, EmptyDocument, EmptyBinary);
+    public static readonly BsonPredicate UselessValue = Or(NullLike, StructurallyEmpty, EmptyGuid, EmptyObjectId, MinValue, MaxValue);
+    public static readonly BsonPredicate UselessValueAggressive = Or(UselessValue, ZeroNumber, FalseBoolean);
 
     public static BsonPredicate Default(BsonValue value)
     {

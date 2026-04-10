@@ -422,6 +422,159 @@ public class MigrationRunner_Tests
     }
 
     [Fact]
+    public async Task SetFieldWhen_ShouldCreateMissingNestedParents_WhenEnabled()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1)
+        });
+
+        await db.Migrations()
+            .Migration("set-create-parents", m => m.ForCollection("tenant_*", c =>
+                c.SetFieldWhen(
+                    "Metadata.Source.Name",
+                    new BsonValue("new"),
+                    BsonPredicates.Always,
+                    new FieldMutationOptions { CreateParents = true })))
+            .RunAsync();
+
+        var doc = await collection.FindById(new BsonValue(1));
+
+        doc["Metadata"].AsDocument["Source"].AsDocument["Name"].AsString.Should().Be("new");
+    }
+
+    [Fact]
+    public async Task AddFieldWhen_ShouldCreateMissingNestedParents_ForWildcardElements_WhenEnabled()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Orders"] = new BsonArray
+            {
+                new BsonDocument(),
+                new BsonDocument
+                {
+                    ["Metadata"] = new BsonDocument
+                    {
+                        ["Source"] = new BsonDocument
+                        {
+                            ["Name"] = new BsonValue("existing")
+                        }
+                    }
+                },
+                new BsonValue("skip")
+            }
+        });
+
+        await db.Migrations()
+            .Migration("add-create-parents", m => m.ForCollection("tenant_*", c =>
+                c.AddFieldWhen(
+                    "Orders[*].Metadata.Source.Name",
+                    new BsonValue("generated"),
+                    BsonPredicates.Missing,
+                    new FieldMutationOptions { CreateParents = true })))
+            .RunAsync();
+
+        var doc = await collection.FindById(new BsonValue(1));
+        var orders = doc["Orders"].AsArray;
+
+        orders[0].AsDocument["Metadata"].AsDocument["Source"].AsDocument["Name"].AsString.Should().Be("generated");
+        orders[1].AsDocument["Metadata"].AsDocument["Source"].AsDocument["Name"].AsString.Should().Be("existing");
+        orders[2].AsString.Should().Be("skip");
+    }
+
+    [Fact]
+    public async Task SetFieldWhen_ShouldRespectExistingOnlyWriteMode()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Metadata"] = new BsonDocument
+            {
+                ["Source"] = new BsonValue("old")
+            }
+        });
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(2),
+            ["Metadata"] = new BsonDocument()
+        });
+
+        await db.Migrations()
+            .Migration("set-existing-only", m => m.ForCollection("tenant_*", c =>
+                c.SetFieldWhen(
+                    "Metadata.Source",
+                    new BsonValue("new"),
+                    BsonPredicates.Always,
+                    new FieldMutationOptions { WriteMode = FieldWriteMode.ExistingOnly })))
+            .RunAsync();
+
+        var first = await collection.FindById(new BsonValue(1));
+        var second = await collection.FindById(new BsonValue(2));
+
+        first["Metadata"].AsDocument["Source"].AsString.Should().Be("new");
+        second["Metadata"].AsDocument.ContainsKey("Source").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SetFieldWhen_ShouldRespectNullOrMissingWriteMode()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Metadata"] = new BsonDocument
+            {
+                ["Source"] = BsonValue.Null
+            }
+        });
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(2),
+            ["Metadata"] = new BsonDocument()
+        });
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(3),
+            ["Metadata"] = new BsonDocument
+            {
+                ["Source"] = new BsonValue("keep")
+            }
+        });
+
+        await db.Migrations()
+            .Migration("set-null-or-missing", m => m.ForCollection("tenant_*", c =>
+                c.SetFieldWhen(
+                    "Metadata.Source",
+                    new BsonValue("new"),
+                    BsonPredicates.Always,
+                    new FieldMutationOptions { WriteMode = FieldWriteMode.NullOrMissing })))
+            .RunAsync();
+
+        var first = await collection.FindById(new BsonValue(1));
+        var second = await collection.FindById(new BsonValue(2));
+        var third = await collection.FindById(new BsonValue(3));
+
+        first["Metadata"].AsDocument["Source"].AsString.Should().Be("new");
+        second["Metadata"].AsDocument["Source"].AsString.Should().Be("new");
+        third["Metadata"].AsDocument["Source"].AsString.Should().Be("keep");
+    }
+
+    [Fact]
     public async Task IndexedPaths_ShouldBeSafeNoOp_ForMixedShapesAndOutOfRangeIndexes()
     {
         await using var db = await LiteDatabase.Open(":memory:");
@@ -1205,6 +1358,107 @@ public class MigrationRunner_Tests
         doc.ContainsKey("Profile").Should().BeFalse();
         orders.Count.Should().Be(1);
         orders[0].AsDocument["Legacy"].AsDocument["Tags"].AsArray.Count.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RemoveWhere_And_PruneEmptyContainers_ShouldApplyCollectionWideRecursiveCleanup()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Profile"] = new BsonDocument
+            {
+                ["Legacy"] = new BsonDocument
+                {
+                    ["Tags"] = new BsonArray()
+                }
+            },
+            ["Orders"] = new BsonArray
+            {
+                new BsonDocument
+                {
+                    ["Legacy"] = new BsonDocument
+                    {
+                        ["Tags"] = new BsonArray()
+                    }
+                },
+                new BsonDocument
+                {
+                    ["Legacy"] = new BsonDocument
+                    {
+                        ["Tags"] = new BsonArray
+                        {
+                            new BsonValue("keep")
+                        }
+                    }
+                }
+            }
+        });
+
+        await db.Migrations()
+            .Migration("document-wide-cleanup", m => m.ForCollection("tenant_*", c => c
+                .PruneEmptyContainers()
+                .RemoveWhere(BsonPredicates.EmptyArray, CleanupScope.Recursive)))
+            .RunAsync();
+
+        var doc = await collection.FindById(new BsonValue(1));
+        var orders = doc["Orders"].AsArray;
+
+        doc.ContainsKey("Profile").Should().BeFalse();
+        orders.Count.Should().Be(1);
+        orders[0].AsDocument["Legacy"].AsDocument["Tags"].AsArray.Count.Should().Be(1);
+        orders[0].AsDocument["Legacy"].AsDocument["Tags"].AsArray[0].AsString.Should().Be("keep");
+    }
+
+    [Fact]
+    public async Task RemoveWhere_ShouldRecursivelyRemoveAggressiveUselessValues()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Name"] = new BsonValue("keep"),
+            ["Flags"] = new BsonValue(false),
+            ["Count"] = new BsonValue(0),
+            ["Marker"] = BsonValue.MaxValue,
+            ["Profile"] = new BsonDocument
+            {
+                ["Nickname"] = new BsonValue("   "),
+                ["Tags"] = new BsonArray(),
+                ["Meta"] = new BsonDocument()
+            },
+            ["Orders"] = new BsonArray
+            {
+                new BsonDocument
+                {
+                    ["Notes"] = new BsonValue("keep"),
+                    ["Tags"] = new BsonArray()
+                },
+                new BsonValue("")
+            }
+        });
+
+        await db.Migrations()
+            .Migration("remove-useless-values", m => m.ForCollection("tenant_*", c =>
+                c.RemoveWhere(BsonPredicates.UselessValueAggressive, CleanupScope.Recursive)))
+            .RunAsync();
+
+        var doc = await collection.FindById(new BsonValue(1));
+        var orders = doc["Orders"].AsArray;
+
+        doc.ContainsKey("Flags").Should().BeFalse();
+        doc.ContainsKey("Count").Should().BeFalse();
+        doc.ContainsKey("Marker").Should().BeFalse();
+        doc.ContainsKey("Profile").Should().BeFalse();
+        doc["Name"].AsString.Should().Be("keep");
+        orders.Count.Should().Be(1);
+        orders[0].AsDocument["Notes"].AsString.Should().Be("keep");
+        orders[0].AsDocument.ContainsKey("Tags").Should().BeFalse();
     }
 
     [Fact]

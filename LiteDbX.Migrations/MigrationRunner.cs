@@ -278,7 +278,25 @@ public sealed class MigrationRunner
 
             currentDocument = postResult.Document ?? currentDocument;
 
-            if (!operationResult.Changed && !postResult.Changed)
+            var cleanupResult = ApplyDocumentOperations(currentDocument, context, plan.Operations, DocumentOperationStage.FinalCleanup);
+
+            if (cleanupResult.DeleteDocument)
+            {
+                if (options.DryRun)
+                {
+                    collectionRemoved++;
+                }
+                else if (await collection.Delete(document["_id"], cancellationToken).ConfigureAwait(false))
+                {
+                    collectionRemoved++;
+                }
+
+                continue;
+            }
+
+            currentDocument = cleanupResult.Document ?? currentDocument;
+
+            if (!operationResult.Changed && !postResult.Changed && !cleanupResult.Changed)
             {
                 continue;
             }
@@ -378,6 +396,18 @@ public sealed class MigrationRunner
 
             document = postResult.Document ?? document;
             changed |= postResult.Changed;
+
+            var cleanupResult = ApplyDocumentOperations(document, context, plan.Operations, DocumentOperationStage.FinalCleanup);
+
+            if (cleanupResult.DeleteDocument)
+            {
+                removed++;
+                anyChanged = true;
+                continue;
+            }
+
+            document = cleanupResult.Document ?? document;
+            changed |= cleanupResult.Changed;
 
             var targetId = FormatRawId(document["_id"]) ?? document["_id"].ToString();
             var sourceIdRaw = FormatRawId(sourceDocument["_id"]);

@@ -142,6 +142,33 @@ public static class BsonPathNavigator
         return contexts;
     }
 
+    internal static IReadOnlyList<BsonPredicateContext> CreateCleanupContexts(BsonDocument document, CleanupScope scope, string collection, string migrationName)
+    {
+        if (document == null) throw new ArgumentNullException(nameof(document));
+
+        var contexts = new List<BsonPredicateContext>();
+
+        foreach (var element in document)
+        {
+            if (string.Equals(element.Key, "_id", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var path = element.Key;
+
+            if (scope == CleanupScope.TopLevel)
+            {
+                contexts.Add(new BsonPredicateContext(document, path, true, element.Value, collection, migrationName));
+                continue;
+            }
+
+            CreateCleanupContexts(document, element.Value, path, collection, migrationName, contexts);
+        }
+
+        return contexts;
+    }
+
     public static bool TryGet(BsonDocument document, string path, out BsonDocument parent, out string fieldName, out BsonValue value)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
@@ -151,7 +178,7 @@ public static class BsonPathNavigator
         fieldName = string.Empty;
         value = BsonValue.Null;
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, out var target))
+        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents: false, out var target))
         {
             return false;
         }
@@ -170,21 +197,31 @@ public static class BsonPathNavigator
     }
 
     public static bool TryAdd(BsonDocument document, string path, BsonValue value, bool overwrite)
+        => TryAdd(document, path, value, overwrite ? FieldWriteMode.Overwrite : FieldWriteMode.MissingOnly, createParents: false);
+
+    public static bool TryAdd(BsonDocument document, string path, BsonValue value, FieldWriteMode writeMode, bool createParents)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, out var target) || !target.CanWrite)
+        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents, out var target) || !target.CanWrite)
         {
             return false;
         }
 
-        if (target.Exists && overwrite == false)
+        value ??= BsonValue.Null;
+
+        if (!CanWrite(target, writeMode))
         {
             return false;
         }
 
-        return SetValue(target, value ?? BsonValue.Null);
+        if (target.Exists && target.Value == value)
+        {
+            return false;
+        }
+
+        return SetValue(target, value);
     }
 
     public static bool TryReplace(BsonDocument document, string path, BsonValue value)
@@ -192,7 +229,7 @@ public static class BsonPathNavigator
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, out var target) || !target.Exists)
+        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents: false, out var target) || !target.Exists)
         {
             return false;
         }
@@ -212,7 +249,7 @@ public static class BsonPathNavigator
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, out var target) || !target.Exists)
+        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents: false, out var target) || !target.Exists)
         {
             return false;
         }
@@ -304,7 +341,7 @@ public static class BsonPathNavigator
     {
         for (var depth = segments.Count - 1; depth > 0; depth--)
         {
-            if (!TryResolveTarget(document, segments, depth, out var target) || !target.Exists || !IsEmptyContainer(target.Value))
+            if (!TryResolveTarget(document, segments, depth, createParents: false, out var target) || !target.Exists || !IsEmptyContainer(target.Value))
             {
                 continue;
             }
@@ -467,7 +504,7 @@ public static class BsonPathNavigator
         return true;
     }
 
-    private static bool TryResolveTarget(BsonDocument document, IReadOnlyList<BsonPathSegment> segments, int segmentCount, out BsonPathTarget target)
+    private static bool TryResolveTarget(BsonDocument document, IReadOnlyList<BsonPathSegment> segments, int segmentCount, bool createParents, out BsonPathTarget target)
     {
         target = default;
 
@@ -493,6 +530,22 @@ public static class BsonPathNavigator
 
                 if (!parent.TryGetValue(segment.PropertyName, out current) || current.IsNull)
                 {
+                    if (!createParents)
+                    {
+                        return false;
+                    }
+
+                    if (!TryCreateIntermediateValue(segments[i + 1], out current))
+                    {
+                        return false;
+                    }
+
+                    parent[segment.PropertyName] = current;
+                    continue;
+                }
+
+                if (!CanTraverseValue(current, segments[i + 1]))
+                {
                     return false;
                 }
 
@@ -511,12 +564,38 @@ public static class BsonPathNavigator
 
             var array = current.AsArray;
 
-            if (segment.ArrayIndex < 0 || segment.ArrayIndex >= array.Count)
+            if (segment.ArrayIndex < 0)
             {
                 return false;
             }
 
+            if (segment.ArrayIndex >= array.Count)
+            {
+                if (!createParents)
+                {
+                    return false;
+                }
+
+                EnsureArrayIndex(array, segment.ArrayIndex);
+            }
+
             current = array[segment.ArrayIndex];
+
+            if ((current == null || current.IsNull) && createParents)
+            {
+                if (!TryCreateIntermediateValue(segments[i + 1], out current))
+                {
+                    return false;
+                }
+
+                array[segment.ArrayIndex] = current;
+                continue;
+            }
+
+            if (!CanTraverseValue(current, segments[i + 1]))
+            {
+                return false;
+            }
         }
 
         var leaf = segments[segmentCount - 1];
@@ -551,9 +630,21 @@ public static class BsonPathNavigator
         }
 
         var arrayParent = current.AsArray;
-        var exists = leaf.ArrayIndex >= 0 && leaf.ArrayIndex < arrayParent.Count;
+
+        if (leaf.ArrayIndex < 0)
+        {
+            return false;
+        }
+
+        var exists = leaf.ArrayIndex < arrayParent.Count;
+
+        if (!exists && !createParents)
+        {
+            return false;
+        }
+
         var currentValue = exists ? arrayParent[leaf.ArrayIndex] : BsonValue.Null;
-        target = BsonPathTarget.ForArrayIndex(arrayParent, leaf.ArrayIndex, exists, currentValue);
+        target = BsonPathTarget.ForArrayIndex(arrayParent, leaf.ArrayIndex, exists, canWrite: true, currentValue);
         return true;
     }
 
@@ -598,6 +689,11 @@ public static class BsonPathNavigator
         {
             if (current == null || current.IsNull || !current.IsDocument)
             {
+                if (includeLeafWhenMissing && current != null && current.IsNull && TryBuildRemainingPath(currentPath, segments, index, out var missingPath))
+                {
+                    AddContext(missingPath, BsonPredicateContext.Missing(root, missingPath, collection, migrationName), seenPaths, contexts);
+                }
+
                 return;
             }
 
@@ -622,12 +718,21 @@ public static class BsonPathNavigator
             {
                 CreateContexts(root, child, segments, index + 1, path, includeLeafWhenMissing, collection, migrationName, seenPaths, contexts);
             }
+            else if (includeLeafWhenMissing && TryBuildRemainingPath(currentPath, segments, index, out var missingPath))
+            {
+                AddContext(missingPath, BsonPredicateContext.Missing(root, missingPath, collection, migrationName), seenPaths, contexts);
+            }
 
             return;
         }
 
         if (current == null || current.IsNull || !current.IsArray)
         {
+            if (includeLeafWhenMissing && current != null && current.IsNull && TryBuildRemainingPath(currentPath, segments, index, out var missingPath))
+            {
+                AddContext(missingPath, BsonPredicateContext.Missing(root, missingPath, collection, migrationName), seenPaths, contexts);
+            }
+
             return;
         }
 
@@ -637,6 +742,11 @@ public static class BsonPathNavigator
         {
             if (segment.ArrayIndex < 0 || segment.ArrayIndex >= array.Count)
             {
+                if (includeLeafWhenMissing && TryBuildRemainingPath(currentPath, segments, index, out var missingPath))
+                {
+                    AddContext(missingPath, BsonPredicateContext.Missing(root, missingPath, collection, migrationName), seenPaths, contexts);
+                }
+
                 return;
             }
 
@@ -681,11 +791,12 @@ public static class BsonPathNavigator
     {
         if (target.IsArrayIndex)
         {
-            if (target.ArrayParent == null || target.ArrayIndex < 0 || target.ArrayIndex >= target.ArrayParent.Count)
+            if (target.ArrayParent == null || target.ArrayIndex < 0)
             {
                 return false;
             }
 
+            EnsureArrayIndex(target.ArrayParent, target.ArrayIndex);
             target.ArrayParent[target.ArrayIndex] = value;
             return true;
         }
@@ -847,6 +958,107 @@ public static class BsonPathNavigator
         return path + "[" + index + "]";
     }
 
+    private static void CreateCleanupContexts(BsonDocument root, BsonValue current, string currentPath, string collection, string migrationName, ICollection<BsonPredicateContext> contexts)
+    {
+        if (current != null && !current.IsNull)
+        {
+            if (current.IsDocument)
+            {
+                foreach (var element in current.AsDocument)
+                {
+                    CreateCleanupContexts(root, element.Value, AppendPropertyName(currentPath, element.Key), collection, migrationName, contexts);
+                }
+            }
+            else if (current.IsArray)
+            {
+                var array = current.AsArray;
+
+                for (var i = array.Count - 1; i >= 0; i--)
+                {
+                    CreateCleanupContexts(root, array[i], AppendArrayIndex(currentPath, i), collection, migrationName, contexts);
+                }
+            }
+        }
+
+        contexts.Add(new BsonPredicateContext(root, currentPath, true, current ?? BsonValue.Null, collection, migrationName));
+    }
+
+    private static bool TryBuildRemainingPath(string currentPath, IReadOnlyList<BsonPathSegment> segments, int startIndex, out string path)
+    {
+        path = currentPath;
+
+        for (var i = startIndex; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+
+            switch (segment.Kind)
+            {
+                case BsonPathSegmentKind.Property:
+                    path = AppendPropertyName(path, segment.PropertyName);
+                    break;
+                case BsonPathSegmentKind.ArrayIndex:
+                    path = AppendArrayIndex(path, segment.ArrayIndex);
+                    break;
+                default:
+                    path = null;
+                    return false;
+            }
+        }
+
+        return path.Length > 0;
+    }
+
+    private static bool TryCreateIntermediateValue(BsonPathSegment nextSegment, out BsonValue value)
+    {
+        switch (nextSegment.Kind)
+        {
+            case BsonPathSegmentKind.Property:
+                value = new BsonDocument();
+                return true;
+            case BsonPathSegmentKind.ArrayIndex:
+                value = new BsonArray();
+                return true;
+            default:
+                value = BsonValue.Null;
+                return false;
+        }
+    }
+
+    private static bool CanTraverseValue(BsonValue value, BsonPathSegment nextSegment)
+    {
+        if (value == null || value.IsNull)
+        {
+            return false;
+        }
+
+        return nextSegment.Kind switch
+        {
+            BsonPathSegmentKind.Property => value.IsDocument,
+            BsonPathSegmentKind.ArrayIndex => value.IsArray,
+            _ => false
+        };
+    }
+
+    private static void EnsureArrayIndex(BsonArray array, int index)
+    {
+        while (array.Count <= index)
+        {
+            array.Add(BsonValue.Null);
+        }
+    }
+
+    private static bool CanWrite(BsonPathTarget target, FieldWriteMode writeMode)
+    {
+        return writeMode switch
+        {
+            FieldWriteMode.MissingOnly => !target.Exists,
+            FieldWriteMode.ExistingOnly => target.Exists,
+            FieldWriteMode.NullOrMissing => !target.Exists || target.Value.IsNull,
+            FieldWriteMode.Overwrite => true,
+            _ => throw new ArgumentOutOfRangeException(nameof(writeMode))
+        };
+    }
+
 
     private enum BsonPathSegmentKind
     {
@@ -906,13 +1118,14 @@ public static class BsonPathNavigator
 
     private readonly struct BsonPathTarget
     {
-        private BsonPathTarget(BsonDocument documentParent, string fieldName, BsonArray arrayParent, int arrayIndex, bool exists, BsonValue value)
+        private BsonPathTarget(BsonDocument documentParent, string fieldName, BsonArray arrayParent, int arrayIndex, bool exists, bool canWrite, BsonValue value)
         {
             DocumentParent = documentParent;
             FieldName = fieldName ?? string.Empty;
             ArrayParent = arrayParent;
             ArrayIndex = arrayIndex;
             Exists = exists;
+            CanWrite = canWrite;
             Value = value ?? BsonValue.Null;
         }
 
@@ -926,17 +1139,17 @@ public static class BsonPathNavigator
 
         public bool Exists { get; }
 
+        public bool CanWrite { get; }
+
         public BsonValue Value { get; }
 
         public bool IsArrayIndex => ArrayParent != null;
 
-        public bool CanWrite => IsArrayIndex ? Exists : DocumentParent != null;
-
         public static BsonPathTarget ForProperty(BsonDocument documentParent, string fieldName, bool exists, BsonValue value)
-            => new(documentParent, fieldName, null, -1, exists, value);
+            => new(documentParent, fieldName, null, -1, exists, documentParent != null, value);
 
-        public static BsonPathTarget ForArrayIndex(BsonArray arrayParent, int arrayIndex, bool exists, BsonValue value)
-            => new(null, string.Empty, arrayParent, arrayIndex, exists, value);
+        public static BsonPathTarget ForArrayIndex(BsonArray arrayParent, int arrayIndex, bool exists, bool canWrite, BsonValue value)
+            => new(null, string.Empty, arrayParent, arrayIndex, exists, canWrite, value);
     }
 }
 
