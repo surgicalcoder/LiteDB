@@ -1462,15 +1462,7 @@ public class MigrationRunner_Tests
     }
 
     [Fact]
-    public void RenameField_ShouldRejectWildcardPaths_InCurrentV2Slice()
-    {
-        var action = () => new CollectionMigrationBuilder().RenameField("Orders[*].LegacyId", "Orders[*].CustomerId");
-
-        action.Should().Throw<ArgumentException>();
-    }
-
-    [Fact]
-    public async Task SetFieldWhen_ShouldRejectRecursivePaths_InCurrentV2Slice()
+    public async Task RenameField_ShouldSupportPairedWildcardPaths()
     {
         await using var db = await LiteDatabase.Open(":memory:");
         var collection = db.GetCollection("tenant_one");
@@ -1478,15 +1470,59 @@ public class MigrationRunner_Tests
         await collection.Insert(new BsonDocument
         {
             ["_id"] = new BsonValue(1),
-            ["Profile"] = new BsonDocument()
+            ["Orders"] = new BsonArray
+            {
+                new BsonDocument { ["LegacyId"] = new BsonValue("first") },
+                new BsonDocument { ["LegacyId"] = new BsonValue("second") }
+            }
         });
 
-        Func<Task> action = async () => await db.Migrations()
-            .Migration("bad-recursive-set", m => m.ForCollection("tenant_*", c =>
+        await db.Migrations()
+            .Migration("rename-wildcard", m => m.ForCollection("tenant_*", c =>
+                c.RenameField("Orders[*].LegacyId", "Orders[*].CustomerId")))
+            .RunAsync();
+
+        var doc = await collection.FindById(new BsonValue(1));
+        var orders = doc["Orders"].AsArray;
+
+        orders[0].AsDocument.ContainsKey("LegacyId").Should().BeFalse();
+        orders[1].AsDocument.ContainsKey("LegacyId").Should().BeFalse();
+        orders[0].AsDocument["CustomerId"].AsString.Should().Be("first");
+        orders[1].AsDocument["CustomerId"].AsString.Should().Be("second");
+    }
+
+    [Fact]
+    public async Task SetFieldWhen_ShouldSupportRecursivePaths()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Profile"] = new BsonDocument(),
+            ["Orders"] = new BsonArray
+            {
+                new BsonDocument
+                {
+                    ["Legacy"] = new BsonDocument()
+                },
+                new BsonValue("skip")
+            }
+        });
+
+        await db.Migrations()
+            .Migration("recursive-set", m => m.ForCollection("tenant_*", c =>
                 c.SetFieldWhen("**.Touched", new BsonValue(true), BsonPredicates.Always)))
             .RunAsync();
 
-        await action.Should().ThrowAsync<InvalidOperationException>();
+        var doc = await collection.FindById(new BsonValue(1));
+
+        doc["Touched"].AsBoolean.Should().BeTrue();
+        doc["Profile"].AsDocument["Touched"].AsBoolean.Should().BeTrue();
+        doc["Orders"].AsArray[0].AsDocument["Touched"].AsBoolean.Should().BeTrue();
+        doc["Orders"].AsArray[0].AsDocument["Legacy"].AsDocument["Touched"].AsBoolean.Should().BeTrue();
+        doc["Orders"].AsArray[1].AsString.Should().Be("skip");
     }
 
     [Fact]
@@ -1936,6 +1972,113 @@ public class MigrationRunner_Tests
             .RunAsync();
 
         report.Migrations[0].Selectors[0].MatchedCollections.Should().NotContain(name => name.Contains("__backup__", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task InsertDocumentWhen_ShouldSeedMissingDocument_AndReportInsertedCount()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Name"] = new BsonValue("existing")
+        });
+
+        var report = await db.Migrations()
+            .Migration("seed-reference-row", m => m.ForCollection("tenant_*", c =>
+                c.InsertDocumentWhen(new BsonDocument
+                {
+                    ["_id"] = new BsonValue(2),
+                    ["Name"] = new BsonValue("seeded")
+                })))
+            .RunAsync();
+
+        var docs = await GetAllDocumentsAsync(collection);
+
+        docs.Should().HaveCount(2);
+        docs.Should().Contain(x => x["_id"] == new BsonValue(2) && x["Name"].AsString == "seeded");
+        report.Migrations[0].DocumentsInserted.Should().Be(1);
+        report.Migrations[0].Selectors[0].Collections[0].DocumentsInserted.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task InsertDocumentWhen_ShouldSkipExistingDocumentId_ByDefault()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(2),
+            ["Name"] = new BsonValue("existing")
+        });
+
+        var report = await db.Migrations()
+            .Migration("seed-reference-row", m => m.ForCollection("tenant_*", c =>
+                c.InsertDocumentWhen(new BsonDocument
+                {
+                    ["_id"] = new BsonValue(2),
+                    ["Name"] = new BsonValue("seeded")
+                })))
+            .RunAsync();
+
+        var docs = await GetAllDocumentsAsync(collection);
+
+        docs.Should().ContainSingle();
+        docs[0]["Name"].AsString.Should().Be("existing");
+        report.Migrations[0].DocumentsInserted.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UseStrictPathResolution_ShouldThrowOnStructuralPathMismatch()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Profile"] = new BsonValue("not-a-document")
+        });
+
+        Func<Task> action = async () => await db.Migrations()
+            .UseStrictPathResolution()
+            .Migration("strict-paths", m => m.ForCollection("tenant_*", c =>
+                c.SetFieldWhen("Profile.Name", new BsonValue("Alice"), BsonPredicates.Always)))
+            .RunAsync();
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Profile.Name*");
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldEmitProgressCallbacks()
+    {
+        await using var db = await LiteDatabase.Open(":memory:");
+        var collection = db.GetCollection("tenant_one");
+        var progress = new List<MigrationProgress>();
+
+        await collection.Insert(new BsonDocument
+        {
+            ["_id"] = new BsonValue(1),
+            ["Metadata"] = new BsonDocument()
+        });
+
+        var report = await db.Migrations()
+            .Migration("progress-demo", m => m.ForCollection("tenant_*", c =>
+                c.SetDefaultWhenMissing("Metadata.Source", new BsonValue("migration"))))
+            .RunAsync(new MigrationRunOptions
+            {
+                ProgressCallback = value => progress.Add(value)
+            });
+
+        progress.Should().Contain(x => x.Stage == MigrationProgressStage.MigrationStarted && x.MigrationName == "progress-demo");
+        progress.Should().Contain(x => x.Stage == MigrationProgressStage.CollectionStarted && x.CollectionName == "tenant_one");
+        progress.Should().Contain(x => x.Stage == MigrationProgressStage.CollectionCompleted && x.CollectionName == "tenant_one" && x.DocumentsModified == 1);
+        progress.Should().Contain(x => x.Stage == MigrationProgressStage.MigrationCompleted && x.MigrationName == "progress-demo" && x.DocumentsModified == 1);
+        report.Migrations[0].DocumentsModified.Should().Be(1);
     }
 
     private static async Task<List<BsonDocument>> GetAllDocumentsAsync(ILiteCollection<BsonDocument> collection)

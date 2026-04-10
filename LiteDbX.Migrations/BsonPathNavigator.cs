@@ -5,6 +5,21 @@ namespace LiteDbX.Migrations;
 
 public static class BsonPathNavigator
 {
+    internal static string DescribeFailure(BsonPathResolutionFailure failure)
+    {
+        return failure switch
+        {
+            BsonPathResolutionFailure.None => "No path resolution failure occurred.",
+            BsonPathResolutionFailure.InvalidPath => "The supplied path is invalid.",
+            BsonPathResolutionFailure.MissingIntermediate => "An intermediate path segment is missing.",
+            BsonPathResolutionFailure.MissingLeaf => "The target field or array element is missing.",
+            BsonPathResolutionFailure.ExpectedDocument => "A document segment was expected but a different value was encountered.",
+            BsonPathResolutionFailure.ExpectedArray => "An array segment was expected but a different value was encountered.",
+            BsonPathResolutionFailure.UnsupportedPattern => "Wildcard or recursive paths are not supported for this direct navigation operation.",
+            _ => throw new ArgumentOutOfRangeException(nameof(failure))
+        };
+    }
+
     public static bool PathsConflict(string sourcePath, string targetPath)
     {
         if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
@@ -170,6 +185,9 @@ public static class BsonPathNavigator
     }
 
     public static bool TryGet(BsonDocument document, string path, out BsonDocument parent, out string fieldName, out BsonValue value)
+        => TryGet(document, path, out parent, out fieldName, out value, out _);
+
+    internal static bool TryGet(BsonDocument document, string path, out BsonDocument parent, out string fieldName, out BsonValue value, out BsonPathResolutionFailure failure)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
@@ -177,8 +195,15 @@ public static class BsonPathNavigator
         parent = null;
         fieldName = string.Empty;
         value = BsonValue.Null;
+        failure = BsonPathResolutionFailure.None;
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents: false, out var target))
+        if (!TryParsePath(path, out var segments))
+        {
+            failure = BsonPathResolutionFailure.InvalidPath;
+            return false;
+        }
+
+        if (!TryResolveTarget(document, segments, segments.Length, createParents: false, out var target, out failure))
         {
             return false;
         }
@@ -190,8 +215,11 @@ public static class BsonPathNavigator
     }
 
     public static BsonPredicateContext CreateContext(BsonDocument document, string path, string collection, string migrationName)
+        => CreateContext(document, path, collection, migrationName, out _);
+
+    internal static BsonPredicateContext CreateContext(BsonDocument document, string path, string collection, string migrationName, out BsonPathResolutionFailure failure)
     {
-        return TryGet(document, path, out _, out _, out var value)
+        return TryGet(document, path, out _, out _, out var value, out failure)
             ? new BsonPredicateContext(document, path, true, value, collection, migrationName)
             : BsonPredicateContext.Missing(document, path, collection, migrationName);
     }
@@ -199,12 +227,26 @@ public static class BsonPathNavigator
     public static bool TryAdd(BsonDocument document, string path, BsonValue value, bool overwrite)
         => TryAdd(document, path, value, overwrite ? FieldWriteMode.Overwrite : FieldWriteMode.MissingOnly, createParents: false);
 
+    internal static bool TryAdd(BsonDocument document, string path, BsonValue value, bool overwrite, out BsonPathResolutionFailure failure)
+        => TryAdd(document, path, value, overwrite ? FieldWriteMode.Overwrite : FieldWriteMode.MissingOnly, createParents: false, out failure);
+
     public static bool TryAdd(BsonDocument document, string path, BsonValue value, FieldWriteMode writeMode, bool createParents)
+        => TryAdd(document, path, value, writeMode, createParents, out _);
+
+    internal static bool TryAdd(BsonDocument document, string path, BsonValue value, FieldWriteMode writeMode, bool createParents, out BsonPathResolutionFailure failure)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents, out var target) || !target.CanWrite)
+        failure = BsonPathResolutionFailure.None;
+
+        if (!TryParsePath(path, out var segments))
+        {
+            failure = BsonPathResolutionFailure.InvalidPath;
+            return false;
+        }
+
+        if (!TryResolveTarget(document, segments, segments.Length, createParents, out var target, out failure) || !target.CanWrite)
         {
             return false;
         }
@@ -225,11 +267,22 @@ public static class BsonPathNavigator
     }
 
     public static bool TryReplace(BsonDocument document, string path, BsonValue value)
+        => TryReplace(document, path, value, out _);
+
+    internal static bool TryReplace(BsonDocument document, string path, BsonValue value, out BsonPathResolutionFailure failure)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents: false, out var target) || !target.Exists)
+        failure = BsonPathResolutionFailure.None;
+
+        if (!TryParsePath(path, out var segments))
+        {
+            failure = BsonPathResolutionFailure.InvalidPath;
+            return false;
+        }
+
+        if (!TryResolveTarget(document, segments, segments.Length, createParents: false, out var target, out failure) || !target.Exists)
         {
             return false;
         }
@@ -245,11 +298,22 @@ public static class BsonPathNavigator
     }
 
     public static bool TryRemove(BsonDocument document, string path, bool pruneEmptyParents)
+        => TryRemove(document, path, pruneEmptyParents, out _);
+
+    internal static bool TryRemove(BsonDocument document, string path, bool pruneEmptyParents, out BsonPathResolutionFailure failure)
     {
         if (document == null) throw new ArgumentNullException(nameof(document));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentNullException(nameof(path));
 
-        if (!TryParsePath(path, out var segments) || !TryResolveTarget(document, segments, segments.Length, createParents: false, out var target) || !target.Exists)
+        failure = BsonPathResolutionFailure.None;
+
+        if (!TryParsePath(path, out var segments))
+        {
+            failure = BsonPathResolutionFailure.InvalidPath;
+            return false;
+        }
+
+        if (!TryResolveTarget(document, segments, segments.Length, createParents: false, out var target, out failure) || !target.Exists)
         {
             return false;
         }
@@ -505,11 +569,16 @@ public static class BsonPathNavigator
     }
 
     private static bool TryResolveTarget(BsonDocument document, IReadOnlyList<BsonPathSegment> segments, int segmentCount, bool createParents, out BsonPathTarget target)
+        => TryResolveTarget(document, segments, segmentCount, createParents, out target, out _);
+
+    private static bool TryResolveTarget(BsonDocument document, IReadOnlyList<BsonPathSegment> segments, int segmentCount, bool createParents, out BsonPathTarget target, out BsonPathResolutionFailure failure)
     {
         target = default;
+        failure = BsonPathResolutionFailure.None;
 
         if (segments == null || segmentCount <= 0 || segmentCount > segments.Count)
         {
+            failure = BsonPathResolutionFailure.InvalidPath;
             return false;
         }
 
@@ -523,6 +592,9 @@ public static class BsonPathNavigator
             {
                 if (current == null || current.IsNull || !current.IsDocument)
                 {
+                    failure = current == null || current.IsNull
+                        ? BsonPathResolutionFailure.MissingIntermediate
+                        : BsonPathResolutionFailure.ExpectedDocument;
                     return false;
                 }
 
@@ -532,6 +604,7 @@ public static class BsonPathNavigator
                 {
                     if (!createParents)
                     {
+                        failure = BsonPathResolutionFailure.MissingIntermediate;
                         return false;
                     }
 
@@ -546,6 +619,9 @@ public static class BsonPathNavigator
 
                 if (!CanTraverseValue(current, segments[i + 1]))
                 {
+                    failure = segments[i + 1].Kind == BsonPathSegmentKind.ArrayIndex
+                        ? BsonPathResolutionFailure.ExpectedArray
+                        : BsonPathResolutionFailure.ExpectedDocument;
                     return false;
                 }
 
@@ -554,11 +630,15 @@ public static class BsonPathNavigator
 
             if (segment.Kind == BsonPathSegmentKind.ArrayWildcard || segment.Kind == BsonPathSegmentKind.RecursiveDescent)
             {
+                failure = BsonPathResolutionFailure.UnsupportedPattern;
                 return false;
             }
 
             if (current == null || current.IsNull || !current.IsArray)
             {
+                failure = current == null || current.IsNull
+                    ? BsonPathResolutionFailure.MissingIntermediate
+                    : BsonPathResolutionFailure.ExpectedArray;
                 return false;
             }
 
@@ -573,6 +653,7 @@ public static class BsonPathNavigator
             {
                 if (!createParents)
                 {
+                    failure = BsonPathResolutionFailure.MissingIntermediate;
                     return false;
                 }
 
@@ -594,6 +675,9 @@ public static class BsonPathNavigator
 
             if (!CanTraverseValue(current, segments[i + 1]))
             {
+                failure = segments[i + 1].Kind == BsonPathSegmentKind.ArrayIndex
+                    ? BsonPathResolutionFailure.ExpectedArray
+                    : BsonPathResolutionFailure.ExpectedDocument;
                 return false;
             }
         }
@@ -604,6 +688,9 @@ public static class BsonPathNavigator
         {
             if (current == null || current.IsNull || !current.IsDocument)
             {
+                failure = current == null || current.IsNull
+                    ? BsonPathResolutionFailure.MissingIntermediate
+                    : BsonPathResolutionFailure.ExpectedDocument;
                 return false;
             }
 
@@ -616,16 +703,21 @@ public static class BsonPathNavigator
             }
 
             target = BsonPathTarget.ForProperty(parent, leaf.PropertyName, false, BsonValue.Null);
+            failure = BsonPathResolutionFailure.MissingLeaf;
             return true;
         }
 
         if (leaf.Kind == BsonPathSegmentKind.ArrayWildcard || leaf.Kind == BsonPathSegmentKind.RecursiveDescent)
         {
+            failure = BsonPathResolutionFailure.UnsupportedPattern;
             return false;
         }
 
         if (current == null || current.IsNull || !current.IsArray)
         {
+            failure = current == null || current.IsNull
+                ? BsonPathResolutionFailure.MissingIntermediate
+                : BsonPathResolutionFailure.ExpectedArray;
             return false;
         }
 
@@ -640,6 +732,7 @@ public static class BsonPathNavigator
 
         if (!exists && !createParents)
         {
+            failure = BsonPathResolutionFailure.MissingLeaf;
             return false;
         }
 
@@ -1059,6 +1152,17 @@ public static class BsonPathNavigator
         };
     }
 
+
+    internal enum BsonPathResolutionFailure
+    {
+        None,
+        InvalidPath,
+        MissingIntermediate,
+        MissingLeaf,
+        ExpectedDocument,
+        ExpectedArray,
+        UnsupportedPattern
+    }
 
     private enum BsonPathSegmentKind
     {

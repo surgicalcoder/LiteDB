@@ -61,6 +61,7 @@ internal readonly struct ResolvedFieldMutationOptions
 public sealed class CollectionMigrationBuilder
 {
     private readonly List<IDocumentMigrationOperation> _operations = new();
+    private readonly List<ICollectionMigrationOperation> _collectionOperations = new();
     private ConvertIdOperation _convertId;
 
     public CollectionMigrationBuilder RemoveFieldWhen(string path, BsonPredicate when, bool pruneEmptyParents = false)
@@ -78,6 +79,32 @@ public sealed class CollectionMigrationBuilder
 
         _operations.Add(new RemoveDocumentWhenOperation(predicate));
         return this;
+    }
+
+    public CollectionMigrationBuilder InsertDocumentWhen(BsonDocumentFactory factory)
+        => InsertDocumentWhen(factory, context => !context.ExistsById);
+
+    public CollectionMigrationBuilder InsertDocumentWhen(BsonDocumentFactory factory, InsertDocumentPredicate when)
+    {
+        if (factory == null) throw new ArgumentNullException(nameof(factory));
+        if (when == null) throw new ArgumentNullException(nameof(when));
+
+        _collectionOperations.Add(new InsertDocumentWhenOperation(factory, when));
+        return this;
+    }
+
+    public CollectionMigrationBuilder InsertDocumentWhen(BsonDocument document)
+    {
+        if (document == null) throw new ArgumentNullException(nameof(document));
+
+        return InsertDocumentWhen(_ => BsonPathNavigator.CloneValue(document).AsDocument);
+    }
+
+    public CollectionMigrationBuilder InsertDocumentWhen(BsonDocument document, InsertDocumentPredicate when)
+    {
+        if (document == null) throw new ArgumentNullException(nameof(document));
+
+        return InsertDocumentWhen(_ => BsonPathNavigator.CloneValue(document).AsDocument, when);
     }
 
     public CollectionMigrationBuilder RemoveWhere(BsonPredicate when, CleanupScope scope = CleanupScope.TopLevel)
@@ -219,7 +246,7 @@ public sealed class CollectionMigrationBuilder
     }
 
     internal CollectionMigrationPlan Build()
-        => new(new ReadOnlyCollection<IDocumentMigrationOperation>(_operations), _convertId);
+        => new(new ReadOnlyCollection<IDocumentMigrationOperation>(_operations), new ReadOnlyCollection<ICollectionMigrationOperation>(_collectionOperations), _convertId);
 
     internal void AddOperation(IDocumentMigrationOperation operation)
     {
@@ -230,13 +257,16 @@ public sealed class CollectionMigrationBuilder
 
 internal sealed class CollectionMigrationPlan
 {
-    public CollectionMigrationPlan(IReadOnlyList<IDocumentMigrationOperation> operations, ConvertIdOperation convertId)
+    public CollectionMigrationPlan(IReadOnlyList<IDocumentMigrationOperation> operations, IReadOnlyList<ICollectionMigrationOperation> collectionOperations, ConvertIdOperation convertId)
     {
         Operations = operations ?? throw new ArgumentNullException(nameof(operations));
+        CollectionOperations = collectionOperations ?? throw new ArgumentNullException(nameof(collectionOperations));
         ConvertId = convertId;
     }
 
     public IReadOnlyList<IDocumentMigrationOperation> Operations { get; }
+
+    public IReadOnlyList<ICollectionMigrationOperation> CollectionOperations { get; }
 
     public ConvertIdOperation ConvertId { get; }
 
@@ -414,16 +444,21 @@ internal sealed class RemoveFieldWhenOperation : IDocumentMigrationOperation
             return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
         }
 
-        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName);
+        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName, out var resolutionFailure);
+        context.ThrowIfStrictPathResolutionFailure(_path, resolutionFailure);
 
         if (!_when(predicateContext) || !predicateContext.Exists)
         {
             return DocumentOperationResult.NoChange();
         }
 
-        return BsonPathNavigator.TryRemove(document, _path, _pruneEmptyParents)
-            ? DocumentOperationResult.Updated()
-            : DocumentOperationResult.NoChange();
+        if (BsonPathNavigator.TryRemove(document, _path, _pruneEmptyParents, out var removeFailure))
+        {
+            return DocumentOperationResult.Updated();
+        }
+
+        context.ThrowIfStrictPathResolutionFailure(_path, removeFailure);
+        return DocumentOperationResult.NoChange();
     }
 }
 
@@ -511,11 +546,6 @@ internal sealed class AddFieldWhenOperation : IDocumentMigrationOperation
 
     public DocumentOperationResult Apply(BsonDocument document, DocumentMigrationExecutionContext context)
     {
-        if (BsonPathNavigator.HasRecursive(_path))
-        {
-            throw new InvalidOperationException("Recursive paths are not supported for AddFieldWhen/SetDefaultWhenMissing in this V2 slice.");
-        }
-
         if (BsonPathNavigator.HasWildcard(_path))
         {
             var predicateContexts = BsonPathNavigator.CreateContexts(document, _path, includeLeafWhenMissing: true, context.CollectionName, context.MigrationName);
@@ -537,7 +567,7 @@ internal sealed class AddFieldWhenOperation : IDocumentMigrationOperation
             return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
         }
 
-        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName);
+        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName, out var resolutionFailure);
 
         if (!_when(predicateContext) || predicateContext.Exists)
         {
@@ -545,10 +575,15 @@ internal sealed class AddFieldWhenOperation : IDocumentMigrationOperation
         }
 
         var newValue = _factory(predicateContext) ?? BsonValue.Null;
+        context.ThrowIfStrictPathResolutionFailure(_path, resolutionFailure, allowMissingLeaf: true, allowMissingIntermediate: _options.CreateParents);
 
-        return BsonPathNavigator.TryAdd(document, _path, newValue, _options.WriteMode, _options.CreateParents)
-            ? DocumentOperationResult.Updated()
-            : DocumentOperationResult.NoChange();
+        if (BsonPathNavigator.TryAdd(document, _path, newValue, _options.WriteMode, _options.CreateParents, out var writeFailure))
+        {
+            return DocumentOperationResult.Updated();
+        }
+
+        context.ThrowIfStrictPathResolutionFailure(_path, writeFailure, allowMissingLeaf: true, allowMissingIntermediate: _options.CreateParents);
+        return DocumentOperationResult.NoChange();
     }
 }
 
@@ -590,7 +625,8 @@ internal sealed class ModifyFieldWhenOperation : IDocumentMigrationOperation
             return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
         }
 
-        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName);
+        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName, out var resolutionFailure);
+        context.ThrowIfStrictPathResolutionFailure(_path, resolutionFailure);
 
         if (!_when(predicateContext) || !predicateContext.Exists)
         {
@@ -660,11 +696,6 @@ internal sealed class SetFieldWhenOperation : IDocumentMigrationOperation
 
     public DocumentOperationResult Apply(BsonDocument document, DocumentMigrationExecutionContext context)
     {
-        if (BsonPathNavigator.HasRecursive(_path))
-        {
-            throw new InvalidOperationException("Recursive paths are not supported for SetFieldWhen in this V2 slice.");
-        }
-
         if (BsonPathNavigator.HasWildcard(_path))
         {
             var predicateContexts = BsonPathNavigator.CreateContexts(document, _path, includeLeafWhenMissing: true, context.CollectionName, context.MigrationName);
@@ -686,7 +717,7 @@ internal sealed class SetFieldWhenOperation : IDocumentMigrationOperation
             return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
         }
 
-        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName);
+        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName, out var resolutionFailure);
 
         if (!_when(predicateContext))
         {
@@ -694,10 +725,15 @@ internal sealed class SetFieldWhenOperation : IDocumentMigrationOperation
         }
 
         var newValue = _factory(predicateContext) ?? BsonValue.Null;
+        context.ThrowIfStrictPathResolutionFailure(_path, resolutionFailure, allowMissingLeaf: true, allowMissingIntermediate: _options.CreateParents);
 
-        return BsonPathNavigator.TryAdd(document, _path, newValue, _options.WriteMode, _options.CreateParents)
-            ? DocumentOperationResult.Updated()
-            : DocumentOperationResult.NoChange();
+        if (BsonPathNavigator.TryAdd(document, _path, newValue, _options.WriteMode, _options.CreateParents, out var writeFailure))
+        {
+            return DocumentOperationResult.Updated();
+        }
+
+        context.ThrowIfStrictPathResolutionFailure(_path, writeFailure, allowMissingLeaf: true, allowMissingIntermediate: _options.CreateParents);
+        return DocumentOperationResult.NoChange();
     }
 }
 
@@ -716,9 +752,23 @@ internal sealed class FieldTransferOperation : IDocumentMigrationOperation
 
     private FieldTransferOperation(string sourcePath, string targetPath, FieldTransferKind kind)
     {
-        if (BsonPathNavigator.HasWildcard(sourcePath) || BsonPathNavigator.HasWildcard(targetPath))
+        var sourceHasRecursive = BsonPathNavigator.HasRecursive(sourcePath);
+        var targetHasRecursive = BsonPathNavigator.HasRecursive(targetPath);
+
+        if (sourceHasRecursive || targetHasRecursive)
         {
-            throw new ArgumentException("Wildcard/recursive paths are not supported for RenameField/CopyField/MoveField in this V2 slice.");
+            throw new ArgumentException("Recursive paths are not supported for RenameField/CopyField/MoveField in this slice.");
+        }
+
+        var sourceHasWildcard = BsonPathNavigator.HasWildcard(sourcePath);
+        var targetHasWildcard = BsonPathNavigator.HasWildcard(targetPath);
+
+        if (sourceHasWildcard || targetHasWildcard)
+        {
+            if (!sourceHasWildcard || !targetHasWildcard || !BsonPathNavigator.CanBindWildcardSiblingPath(sourcePath, targetPath))
+            {
+                throw new ArgumentException("Wildcard RenameField/CopyField/MoveField paths must share the same wildcard topology and parent path.");
+            }
         }
 
         if (BsonPathNavigator.PathsConflict(sourcePath, targetPath))
@@ -741,20 +791,73 @@ internal sealed class FieldTransferOperation : IDocumentMigrationOperation
 
     public DocumentOperationResult Apply(BsonDocument document, DocumentMigrationExecutionContext context)
     {
-        if (!BsonPathNavigator.TryGet(document, _sourcePath, out _, out _, out var value))
+        if (BsonPathNavigator.HasWildcard(_sourcePath))
         {
+            var sourceContexts = BsonPathNavigator.CreateContexts(document, _sourcePath, includeLeafWhenMissing: false, context.CollectionName, context.MigrationName);
+            var changed = false;
+            var start = _kind == FieldTransferKind.Copy ? 0 : sourceContexts.Count - 1;
+            var end = _kind == FieldTransferKind.Copy ? sourceContexts.Count : -1;
+            var step = _kind == FieldTransferKind.Copy ? 1 : -1;
+
+            for (var i = start; i != end; i += step)
+            {
+                var sourceContext = sourceContexts[i];
+
+                if (!sourceContext.Exists || !BsonPathNavigator.TryBindPath(_targetPath, sourceContext.Path, out var boundTargetPath))
+                {
+                    continue;
+                }
+
+                if (BsonPathNavigator.TryGet(document, boundTargetPath, out _, out _, out _))
+                {
+                    continue;
+                }
+
+                var wildcardClonedValue = BsonPathNavigator.CloneValue(sourceContext.Value);
+
+                if (!BsonPathNavigator.TryAdd(document, boundTargetPath, wildcardClonedValue, overwrite: false, out var addFailure))
+                {
+                    context.ThrowIfStrictPathResolutionFailure(boundTargetPath, addFailure, allowMissingLeaf: true);
+                    continue;
+                }
+
+                if (_kind == FieldTransferKind.Copy)
+                {
+                    changed = true;
+                    continue;
+                }
+
+                var removedWildcard = BsonPathNavigator.TryRemove(document, sourceContext.Path, pruneEmptyParents: false, out var removeFailure);
+
+                if (removedWildcard)
+                {
+                    changed = true;
+                    continue;
+                }
+
+                BsonPathNavigator.TryRemove(document, boundTargetPath, pruneEmptyParents: false);
+                context.ThrowIfStrictPathResolutionFailure(sourceContext.Path, removeFailure);
+            }
+
+            return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
+        }
+
+        if (!BsonPathNavigator.TryGet(document, _sourcePath, out _, out _, out var value, out var sourceFailure))
+        {
+            context.ThrowIfStrictPathResolutionFailure(_sourcePath, sourceFailure);
             return DocumentOperationResult.NoChange();
         }
 
-        if (BsonPathNavigator.TryGet(document, _targetPath, out _, out _, out _))
+        if (BsonPathNavigator.TryGet(document, _targetPath, out _, out _, out _, out var targetLookupFailure))
         {
             return DocumentOperationResult.NoChange();
         }
 
         var clonedValue = BsonPathNavigator.CloneValue(value);
 
-        if (!BsonPathNavigator.TryAdd(document, _targetPath, clonedValue, overwrite: false))
+        if (!BsonPathNavigator.TryAdd(document, _targetPath, clonedValue, overwrite: false, out var addTargetFailure))
         {
+            context.ThrowIfStrictPathResolutionFailure(_targetPath, targetLookupFailure != BsonPathNavigator.BsonPathResolutionFailure.None ? targetLookupFailure : addTargetFailure, allowMissingLeaf: true);
             return DocumentOperationResult.NoChange();
         }
 
@@ -763,7 +866,7 @@ internal sealed class FieldTransferOperation : IDocumentMigrationOperation
             return DocumentOperationResult.Updated();
         }
 
-        var removed = BsonPathNavigator.TryRemove(document, _sourcePath, pruneEmptyParents: false);
+        var removed = BsonPathNavigator.TryRemove(document, _sourcePath, pruneEmptyParents: false, out var removeExactFailure);
 
         if (removed)
         {
@@ -771,6 +874,7 @@ internal sealed class FieldTransferOperation : IDocumentMigrationOperation
         }
 
         BsonPathNavigator.TryRemove(document, _targetPath, pruneEmptyParents: false);
+        context.ThrowIfStrictPathResolutionFailure(_sourcePath, removeExactFailure);
         return DocumentOperationResult.NoChange();
     }
 }
@@ -871,7 +975,8 @@ internal sealed class RepairReferenceOperation : IDocumentMigrationOperation, II
 
         if (_referenceCollectionPath != null)
         {
-            var refContext = BsonPathNavigator.CreateContext(document, _referenceCollectionPath, context.CollectionName, context.MigrationName);
+            var refContext = BsonPathNavigator.CreateContext(document, _referenceCollectionPath, context.CollectionName, context.MigrationName, out var referenceFailure);
+            context.ThrowIfStrictPathResolutionFailure(_referenceCollectionPath, referenceFailure);
 
             if (!refContext.Exists || !refContext.Value.IsString || !string.Equals(refContext.Value.AsString, SourceCollection, StringComparison.OrdinalIgnoreCase))
             {
@@ -879,7 +984,8 @@ internal sealed class RepairReferenceOperation : IDocumentMigrationOperation, II
             }
         }
 
-        var targetContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName);
+        var targetContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName, out var targetFailure);
+        context.ThrowIfStrictPathResolutionFailure(_path, targetFailure);
 
         if (!targetContext.Exists || !targetContext.Value.IsString)
         {
@@ -891,7 +997,7 @@ internal sealed class RepairReferenceOperation : IDocumentMigrationOperation, II
             return DocumentOperationResult.NoChange();
         }
 
-        var changed = BsonPathNavigator.TryReplace(document, _path, new BsonValue(new ObjectId(objectId)));
+        var changed = BsonPathNavigator.TryReplace(document, _path, new BsonValue(new ObjectId(objectId)), out var replaceFailure);
 
         if (changed)
         {
@@ -899,6 +1005,7 @@ internal sealed class RepairReferenceOperation : IDocumentMigrationOperation, II
             return DocumentOperationResult.Updated();
         }
 
+        context.ThrowIfStrictPathResolutionFailure(_path, replaceFailure);
         return DocumentOperationResult.NoChange();
     }
 }
@@ -964,7 +1071,8 @@ internal sealed class ConvertStringToObjectIdOperation : IDocumentMigrationOpera
             return changed ? DocumentOperationResult.Updated() : DocumentOperationResult.NoChange();
         }
 
-        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName);
+        var predicateContext = BsonPathNavigator.CreateContext(document, _path, context.CollectionName, context.MigrationName, out var resolutionFailure);
+        context.ThrowIfStrictPathResolutionFailure(_path, resolutionFailure);
 
         if (!predicateContext.Exists || predicateContext.Value.IsObjectId)
         {

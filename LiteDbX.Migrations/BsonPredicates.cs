@@ -49,6 +49,12 @@ public static class BsonPredicates
         return context => context.Exists && values.Any(x => x == context.Value);
     }
 
+    public static BsonPredicate AllOf(params BsonPredicate[] predicates)
+        => And(predicates);
+
+    public static BsonPredicate AnyOf(params BsonPredicate[] predicates)
+        => Or(predicates);
+
     public static BsonPredicate And(params BsonPredicate[] predicates)
     {
         if (predicates == null) throw new ArgumentNullException(nameof(predicates));

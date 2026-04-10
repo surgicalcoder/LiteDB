@@ -6,12 +6,18 @@ public sealed class MigrationRunOptions
 
     public BackupRetentionPolicy BackupRetentionPolicy { get; set; } = BackupRetentionPolicy.KeepAll;
 
+    public bool StrictPathResolution { get; set; }
+
+    public System.Action<MigrationProgress> ProgressCallback { get; set; }
+
     internal MigrationRunOptions Clone()
     {
         return new MigrationRunOptions
         {
             DryRun = DryRun,
-            BackupRetentionPolicy = BackupRetentionPolicy
+            BackupRetentionPolicy = BackupRetentionPolicy,
+            StrictPathResolution = StrictPathResolution,
+            ProgressCallback = ProgressCallback
         };
     }
 }

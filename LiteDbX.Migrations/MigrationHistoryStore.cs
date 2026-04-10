@@ -35,6 +35,7 @@ internal sealed class MigrationHistoryStore
             ["documentsScanned"] = new BsonValue(result.DocumentsScanned),
             ["documentsModified"] = new BsonValue(result.DocumentsModified),
             ["documentsRemoved"] = new BsonValue(result.DocumentsRemoved),
+            ["documentsInserted"] = new BsonValue(result.DocumentsInserted),
             ["generatedIdMappings"] = new BsonValue(result.GeneratedIdMappings),
             ["repairedReferences"] = new BsonValue(result.RepairedReferences),
             ["runId"] = new BsonValue(result.RunId)

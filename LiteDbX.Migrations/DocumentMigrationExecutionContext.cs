@@ -13,13 +13,14 @@ internal sealed class DocumentMigrationExecutionContext
     private int _repairedReferences;
     private int _invalidValueCount;
 
-    public DocumentMigrationExecutionContext(string collectionName, string migrationName, string runId, Dictionary<string, Dictionary<string, ObjectId>> remapLookup, bool captureInvalidValueSamples)
+    public DocumentMigrationExecutionContext(string collectionName, string migrationName, string runId, Dictionary<string, Dictionary<string, ObjectId>> remapLookup, bool captureInvalidValueSamples, bool strictPathResolution)
     {
         CollectionName = collectionName ?? throw new ArgumentNullException(nameof(collectionName));
         MigrationName = migrationName ?? throw new ArgumentNullException(nameof(migrationName));
         RunId = runId ?? throw new ArgumentNullException(nameof(runId));
         _remapLookup = remapLookup ?? new Dictionary<string, Dictionary<string, ObjectId>>(StringComparer.OrdinalIgnoreCase);
         _captureInvalidValueSamples = captureInvalidValueSamples;
+        StrictPathResolution = strictPathResolution;
     }
 
     public string CollectionName { get; }
@@ -27,6 +28,8 @@ internal sealed class DocumentMigrationExecutionContext
     public string MigrationName { get; }
 
     public string RunId { get; }
+
+    public bool StrictPathResolution { get; }
 
     public int RepairedReferences => _repairedReferences;
 
@@ -83,6 +86,26 @@ internal sealed class DocumentMigrationExecutionContext
         }
 
         _invalidValueSamples.Add(new InvalidValueSample(normalizedPath, FormatRawValue(value), value?.Type.ToString(), reason));
+    }
+
+    public void ThrowIfStrictPathResolutionFailure(string path, BsonPathNavigator.BsonPathResolutionFailure failure, bool allowMissingLeaf = false, bool allowMissingIntermediate = false)
+    {
+        if (!StrictPathResolution || failure == BsonPathNavigator.BsonPathResolutionFailure.None)
+        {
+            return;
+        }
+
+        if (allowMissingLeaf && failure == BsonPathNavigator.BsonPathResolutionFailure.MissingLeaf)
+        {
+            return;
+        }
+
+        if (allowMissingIntermediate && failure == BsonPathNavigator.BsonPathResolutionFailure.MissingIntermediate)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Path '{path}' could not be resolved in collection '{CollectionName}' for migration '{MigrationName}': {BsonPathNavigator.DescribeFailure(failure)}");
     }
 
     public static string BuildLookupKey(string sourceCollection, string sourceMigrationName)

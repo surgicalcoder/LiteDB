@@ -44,6 +44,18 @@ public class BsonPredicates_Tests
         BsonPredicates.UselessValueAggressive(CreateContext(new BsonValue("keep"))).Should().BeFalse();
     }
 
+    [Fact]
+    public void AnyOf_And_AllOf_ShouldComposePredicates()
+    {
+        var whitespace = CreateContext(new BsonValue("   "));
+        var word = CreateContext(new BsonValue("value"));
+
+        BsonPredicates.AnyOf(BsonPredicates.Null, BsonPredicates.TrimmedEmptyString)(whitespace).Should().BeTrue();
+        BsonPredicates.AnyOf(BsonPredicates.Null, BsonPredicates.TrimmedEmptyString)(word).Should().BeFalse();
+        BsonPredicates.AllOf(BsonPredicates.IsString, BsonPredicates.TrimmedEmptyString)(whitespace).Should().BeTrue();
+        BsonPredicates.AllOf(BsonPredicates.IsString, BsonPredicates.TrimmedEmptyString)(word).Should().BeFalse();
+    }
+
     private static BsonPredicateContext CreateContext(BsonValue value)
         => new(new BsonDocument(), "Value", true, value, "tests", "predicates");
 }

@@ -43,7 +43,7 @@ public sealed class MigrationReport
 
 public sealed class MigrationExecutionResult
 {
-    internal MigrationExecutionResult(string name, string runId, bool wasApplied, bool isDryRun, IReadOnlyList<CollectionSelectorResult> selectors, int documentsScanned, int documentsModified, int documentsRemoved, int generatedIdMappings, int repairedReferences, int invalidValueCount)
+    internal MigrationExecutionResult(string name, string runId, bool wasApplied, bool isDryRun, IReadOnlyList<CollectionSelectorResult> selectors, int documentsScanned, int documentsModified, int documentsRemoved, int documentsInserted, int generatedIdMappings, int repairedReferences, int invalidValueCount)
     {
         Name = name;
         RunId = runId;
@@ -53,6 +53,7 @@ public sealed class MigrationExecutionResult
         DocumentsScanned = documentsScanned;
         DocumentsModified = documentsModified;
         DocumentsRemoved = documentsRemoved;
+        DocumentsInserted = documentsInserted;
         GeneratedIdMappings = generatedIdMappings;
         RepairedReferences = repairedReferences;
         InvalidValueCount = invalidValueCount;
@@ -67,6 +68,7 @@ public sealed class MigrationExecutionResult
     public int DocumentsScanned { get; }
     public int DocumentsModified { get; }
     public int DocumentsRemoved { get; }
+    public int DocumentsInserted { get; }
     public int GeneratedIdMappings { get; }
     public int RepairedReferences { get; }
     public int InvalidValueCount { get; }
@@ -89,12 +91,13 @@ public sealed class CollectionSelectorResult
 
 public sealed class CollectionMigrationResult
 {
-    internal CollectionMigrationResult(string collectionName, int documentsScanned, int documentsModified, int documentsRemoved, int generatedIdMappings, int repairedReferences, int invalidValueCount, IReadOnlyList<InvalidValueSample> invalidValueSamples, RebuildValidationSummary rebuildValidation, string backupCollectionName, BackupDisposition backupDisposition)
+    internal CollectionMigrationResult(string collectionName, int documentsScanned, int documentsModified, int documentsRemoved, int documentsInserted, int generatedIdMappings, int repairedReferences, int invalidValueCount, IReadOnlyList<InvalidValueSample> invalidValueSamples, RebuildValidationSummary rebuildValidation, string backupCollectionName, BackupDisposition backupDisposition)
     {
         CollectionName = collectionName;
         DocumentsScanned = documentsScanned;
         DocumentsModified = documentsModified;
         DocumentsRemoved = documentsRemoved;
+        DocumentsInserted = documentsInserted;
         GeneratedIdMappings = generatedIdMappings;
         RepairedReferences = repairedReferences;
         InvalidValueCount = invalidValueCount;
@@ -108,6 +111,7 @@ public sealed class CollectionMigrationResult
     public int DocumentsScanned { get; }
     public int DocumentsModified { get; }
     public int DocumentsRemoved { get; }
+    public int DocumentsInserted { get; }
     public int GeneratedIdMappings { get; }
     public int RepairedReferences { get; }
     public int InvalidValueCount { get; }

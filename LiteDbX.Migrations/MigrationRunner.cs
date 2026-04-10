@@ -53,6 +53,18 @@ public sealed class MigrationRunner
         return this;
     }
 
+    public MigrationRunner UseStrictPathResolution(bool enabled = true)
+    {
+        _defaultRunOptions.StrictPathResolution = enabled;
+        return this;
+    }
+
+    public MigrationRunner OnProgress(Action<MigrationProgress> callback)
+    {
+        _defaultRunOptions.ProgressCallback = callback;
+        return this;
+    }
+
     public MigrationRunner Migration(string name, Action<MigrationBuilder> configure)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
@@ -154,7 +166,7 @@ public sealed class MigrationRunner
 
             if (await history.IsAppliedAsync(migration.Name, cancellationToken).ConfigureAwait(false))
             {
-                results.Add(new MigrationExecutionResult(migration.Name, runId: string.Empty, wasApplied: false, isDryRun: false, selectors: Array.Empty<CollectionSelectorResult>(), documentsScanned: 0, documentsModified: 0, documentsRemoved: 0, generatedIdMappings: 0, repairedReferences: 0, invalidValueCount: 0));
+                results.Add(new MigrationExecutionResult(migration.Name, runId: string.Empty, wasApplied: false, isDryRun: false, selectors: Array.Empty<CollectionSelectorResult>(), documentsScanned: 0, documentsModified: 0, documentsRemoved: 0, documentsInserted: 0, generatedIdMappings: 0, repairedReferences: 0, invalidValueCount: 0));
                 continue;
             }
 
@@ -163,6 +175,7 @@ public sealed class MigrationRunner
             var scanned = 0;
             var modified = 0;
             var removed = 0;
+            var inserted = 0;
             var generatedIdMappings = 0;
             var repairedReferences = 0;
             var invalidValueCount = 0;
@@ -174,6 +187,10 @@ public sealed class MigrationRunner
                 resolvedDefinitions.Add(new ResolvedCollectionMigrationDefinition(definition, matchedCollections));
             }
 
+            var totalCollections = resolvedDefinitions.Sum(x => x.MatchedCollections.Count);
+            var completedCollections = 0;
+            ReportProgress(options, new MigrationProgress(MigrationProgressStage.MigrationStarted, migration.Name, selector: null, collectionName: null, options.DryRun, completedCollections, totalCollections, scanned, modified, removed, inserted));
+
             foreach (var resolvedDefinition in resolvedDefinitions)
             {
                 var definition = resolvedDefinition.Definition;
@@ -182,6 +199,8 @@ public sealed class MigrationRunner
 
                 foreach (var collectionName in matchedCollections)
                 {
+                    ReportProgress(options, new MigrationProgress(MigrationProgressStage.CollectionStarted, migration.Name, definition.Selector, collectionName, options.DryRun, completedCollections, totalCollections, scanned, modified, removed, inserted));
+
                     var collectionResult = definition.Plan.RequiresRebuild
                         ? await ExecuteRebuildCollectionAsync(collectionName, definition.Selector, migration.Name, runId, definition.Plan, options, idRemapLog, cancellationToken).ConfigureAwait(false)
                         : await ExecuteInPlaceCollectionAsync(collectionName, migration.Name, definition.Plan, options, cancellationToken).ConfigureAwait(false);
@@ -192,11 +211,14 @@ public sealed class MigrationRunner
                     scanned += collectionScanned;
                     modified += collectionModified;
                     removed += collectionResult.DocumentsRemoved;
+                    inserted += collectionResult.DocumentsInserted;
                     generatedIdMappings += collectionResult.GeneratedIdMappings;
                     repairedReferences += collectionResult.RepairedReferences;
                     invalidValueCount += collectionResult.InvalidValueCount;
 
-                    collectionResults.Add(new CollectionMigrationResult(collectionName, collectionScanned, collectionModified, collectionResult.DocumentsRemoved, collectionResult.GeneratedIdMappings, collectionResult.RepairedReferences, collectionResult.InvalidValueCount, new ReadOnlyCollection<InvalidValueSample>(collectionResult.InvalidValueSamples.ToList()), collectionResult.RebuildValidation, collectionResult.BackupCollectionName, collectionResult.BackupDisposition));
+                    collectionResults.Add(new CollectionMigrationResult(collectionName, collectionScanned, collectionModified, collectionResult.DocumentsRemoved, collectionResult.DocumentsInserted, collectionResult.GeneratedIdMappings, collectionResult.RepairedReferences, collectionResult.InvalidValueCount, new ReadOnlyCollection<InvalidValueSample>(collectionResult.InvalidValueSamples.ToList()), collectionResult.RebuildValidation, collectionResult.BackupCollectionName, collectionResult.BackupDisposition));
+                    completedCollections++;
+                    ReportProgress(options, new MigrationProgress(MigrationProgressStage.CollectionCompleted, migration.Name, definition.Selector, collectionName, options.DryRun, completedCollections, totalCollections, scanned, modified, removed, inserted));
                 }
 
                 selectorResults.Add(new CollectionSelectorResult(definition.Selector, matchedCollections, new ReadOnlyCollection<CollectionMigrationResult>(collectionResults)));
@@ -211,9 +233,12 @@ public sealed class MigrationRunner
                 documentsScanned: scanned,
                 documentsModified: modified,
                 documentsRemoved: removed,
+                documentsInserted: inserted,
                 generatedIdMappings: generatedIdMappings,
                 repairedReferences: repairedReferences,
                 invalidValueCount: invalidValueCount);
+
+            ReportProgress(options, new MigrationProgress(MigrationProgressStage.MigrationCompleted, migration.Name, selector: null, collectionName: null, options.DryRun, completedCollections, totalCollections, scanned, modified, removed, inserted));
 
             if (!options.DryRun)
             {
@@ -232,8 +257,9 @@ public sealed class MigrationRunner
         var collectionScanned = 0;
         var collectionModified = 0;
         var collectionRemoved = 0;
+        var finalDocumentIds = new HashSet<string>(StringComparer.Ordinal);
         var remapLookup = await LoadRemapLookupAsync(plan, cancellationToken).ConfigureAwait(false);
-        var context = new DocumentMigrationExecutionContext(collectionName, migrationName, string.Empty, remapLookup, options.DryRun);
+        var context = new DocumentMigrationExecutionContext(collectionName, migrationName, string.Empty, remapLookup, options.DryRun, options.StrictPathResolution);
 
         await foreach (var document in collection.Query().ToDocuments(cancellationToken).ConfigureAwait(false))
         {
@@ -298,6 +324,7 @@ public sealed class MigrationRunner
 
             if (!operationResult.Changed && !postResult.Changed && !cleanupResult.Changed)
             {
+                finalDocumentIds.Add(CollectionOperationExecutionContext.BuildDocumentIdKey(currentDocument["_id"]));
                 continue;
             }
 
@@ -314,9 +341,13 @@ public sealed class MigrationRunner
                     collectionModified++;
                 }
             }
+
+            finalDocumentIds.Add(CollectionOperationExecutionContext.BuildDocumentIdKey(currentDocument["_id"]));
         }
 
-        return new CollectionExecutionResult(collectionScanned, collectionModified, collectionRemoved, 0, context.RepairedReferences, context.InvalidValueCount, context.InvalidValueSamples, null, null, BackupDisposition.None);
+        var collectionInserted = await ExecuteCollectionOperationsAsync(collection, collectionName, migrationName, plan.CollectionOperations, options, finalDocumentIds, cancellationToken).ConfigureAwait(false);
+
+        return new CollectionExecutionResult(collectionScanned, collectionModified, collectionRemoved, collectionInserted, 0, context.RepairedReferences, context.InvalidValueCount, context.InvalidValueSamples, null, null, BackupDisposition.None);
     }
 
     private async ValueTask<CollectionExecutionResult> ExecuteRebuildCollectionAsync(
@@ -349,13 +380,15 @@ public sealed class MigrationRunner
         var removed = 0;
         var generatedMappings = 0;
         var preparedTargetCount = 0;
+        var insertedDocuments = 0;
         var duplicateTargetIdCount = 0;
         var duplicateTargetIdSamples = new List<DuplicateTargetIdSample>();
         var anyChanged = false;
         var seenIds = new Dictionary<string, SeenTargetId>(StringComparer.OrdinalIgnoreCase);
+        var knownDocumentIds = new HashSet<string>(StringComparer.Ordinal);
         long ordinal = 0;
         var remapLookup = await LoadRemapLookupAsync(plan, cancellationToken).ConfigureAwait(false);
-        var context = new DocumentMigrationExecutionContext(collectionName, migrationName, runId, remapLookup, options.DryRun);
+        var context = new DocumentMigrationExecutionContext(collectionName, migrationName, runId, remapLookup, options.DryRun, options.StrictPathResolution);
 
         await foreach (var sourceDocument in sourceCollection.Query().ToDocuments(cancellationToken).ConfigureAwait(false))
         {
@@ -439,6 +472,7 @@ public sealed class MigrationRunner
             }
 
             seenIds[targetId] = new SeenTargetId(sourceIdRaw, sourceIdType, ordinal);
+            knownDocumentIds.Add(CollectionOperationExecutionContext.BuildDocumentIdKey(document["_id"]));
             preparedTargetCount++;
 
             if (!options.DryRun)
@@ -459,6 +493,10 @@ public sealed class MigrationRunner
             }
         }
 
+        insertedDocuments = await ExecuteCollectionOperationsAsync(shadowCollection, collectionName, migrationName, plan.CollectionOperations, options, knownDocumentIds, cancellationToken).ConfigureAwait(false);
+        preparedTargetCount += insertedDocuments;
+        anyChanged |= insertedDocuments > 0;
+
         if (!anyChanged)
         {
             if (!options.DryRun)
@@ -466,7 +504,7 @@ public sealed class MigrationRunner
                 await _database.DropCollection(shadowCollectionName, cancellationToken).ConfigureAwait(false);
             }
 
-            return new CollectionExecutionResult(scanned, 0, 0, 0, 0, context.InvalidValueCount, context.InvalidValueSamples, null, null, BackupDisposition.None);
+            return new CollectionExecutionResult(scanned, 0, 0, 0, 0, 0, context.InvalidValueCount, context.InvalidValueSamples, null, null, BackupDisposition.None);
         }
 
         var secondaryIndexesToReplay = indexes
@@ -475,7 +513,7 @@ public sealed class MigrationRunner
 
         var rebuildValidation = new RebuildValidationSummary(
             sourceDocumentCount: scanned,
-            expectedTargetDocumentCount: scanned - removed,
+            expectedTargetDocumentCount: scanned - removed + insertedDocuments,
             preparedTargetDocumentCount: preparedTargetCount,
             secondaryIndexesToReplayCount: secondaryIndexesToReplay.Count,
             secondaryIndexesToReplay: new ReadOnlyCollection<SecondaryIndexReplayPlan>(secondaryIndexesToReplay
@@ -487,7 +525,7 @@ public sealed class MigrationRunner
 
         if (options.DryRun)
         {
-            return new CollectionExecutionResult(scanned, modified, removed, generatedMappings, context.RepairedReferences, context.InvalidValueCount, context.InvalidValueSamples, rebuildValidation, backupCollectionName, BackupDisposition.Planned);
+            return new CollectionExecutionResult(scanned, modified, removed, insertedDocuments, generatedMappings, context.RepairedReferences, context.InvalidValueCount, context.InvalidValueSamples, rebuildValidation, backupCollectionName, BackupDisposition.Planned);
         }
 
         foreach (var index in indexes.Where(x => !string.Equals(x.Name, "_id", StringComparison.OrdinalIgnoreCase)))
@@ -522,7 +560,28 @@ public sealed class MigrationRunner
             reportBackupCollectionName = null;
         }
 
-        return new CollectionExecutionResult(scanned, modified, removed, generatedMappings, context.RepairedReferences, context.InvalidValueCount, context.InvalidValueSamples, rebuildValidation, reportBackupCollectionName, backupDisposition);
+        return new CollectionExecutionResult(scanned, modified, removed, insertedDocuments, generatedMappings, context.RepairedReferences, context.InvalidValueCount, context.InvalidValueSamples, rebuildValidation, reportBackupCollectionName, backupDisposition);
+    }
+
+    private static async ValueTask<int> ExecuteCollectionOperationsAsync(ILiteCollection<BsonDocument> collection, string collectionName, string migrationName, IReadOnlyList<ICollectionMigrationOperation> operations, MigrationRunOptions options, ISet<string> knownDocumentIds, CancellationToken cancellationToken)
+    {
+        if (operations == null || operations.Count == 0)
+        {
+            return 0;
+        }
+
+        var context = new CollectionOperationExecutionContext(collectionName, migrationName, options.DryRun, knownDocumentIds);
+        var insertedDocuments = 0;
+
+        for (var i = 0; i < operations.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var result = await operations[i].ApplyAsync(collection, context, cancellationToken).ConfigureAwait(false);
+            insertedDocuments += result.DocumentsInserted;
+        }
+
+        return insertedDocuments;
     }
 
     private async ValueTask<IReadOnlyList<CollectionIndexDefinition>> ReadIndexesAsync(string collectionName, CancellationToken cancellationToken)
@@ -759,13 +818,19 @@ public sealed class MigrationRunner
         return values.Max();
     }
 
+    private static void ReportProgress(MigrationRunOptions options, MigrationProgress progress)
+    {
+        options?.ProgressCallback?.Invoke(progress);
+    }
+
     private readonly struct CollectionExecutionResult
     {
-        public CollectionExecutionResult(int documentsScanned, int documentsModified, int documentsRemoved, int generatedIdMappings, int repairedReferences, int invalidValueCount, IReadOnlyList<InvalidValueSample> invalidValueSamples, RebuildValidationSummary rebuildValidation, string backupCollectionName, BackupDisposition backupDisposition)
+        public CollectionExecutionResult(int documentsScanned, int documentsModified, int documentsRemoved, int documentsInserted, int generatedIdMappings, int repairedReferences, int invalidValueCount, IReadOnlyList<InvalidValueSample> invalidValueSamples, RebuildValidationSummary rebuildValidation, string backupCollectionName, BackupDisposition backupDisposition)
         {
             DocumentsScanned = documentsScanned;
             DocumentsModified = documentsModified;
             DocumentsRemoved = documentsRemoved;
+            DocumentsInserted = documentsInserted;
             GeneratedIdMappings = generatedIdMappings;
             RepairedReferences = repairedReferences;
             InvalidValueCount = invalidValueCount;
@@ -778,6 +843,7 @@ public sealed class MigrationRunner
         public int DocumentsScanned { get; }
         public int DocumentsModified { get; }
         public int DocumentsRemoved { get; }
+        public int DocumentsInserted { get; }
         public int GeneratedIdMappings { get; }
         public int RepairedReferences { get; }
         public int InvalidValueCount { get; }
