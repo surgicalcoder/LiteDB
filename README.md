@@ -17,8 +17,8 @@ Today the project includes:
 
 > **Current status**
 >
-> LiteDbX now exposes an async-only public lifecycle and data-access surface: open databases with `await LiteDatabase.Open(...)`, `await LiteRepository.Open(...)`, or `await LiteEngine.Open(...)`, use async CRUD/query APIs, and dispose with `await using`.
-> The material under `docs/async-redesign/` remains useful as design history and implementation background, but the primary async-only API shape is now in place.
+> LiteDbX now exposes dual lifecycle entry points: open databases with `LiteDatabase.Open(...)` / `LiteDatabase.OpenAsync(...)`, `LiteRepository.Open(...)` / `LiteRepository.OpenAsync(...)`, or `LiteEngine.Open(...)` / `LiteEngine.OpenAsync(...)`, use async CRUD/query APIs, and dispose with `await using`.
+> The material under `docs/async-redesign/` remains useful as design history and implementation background, but the current API now supports synchronous open for constructor/startup boundaries while keeping data access async.
 
 ## Install
 
@@ -42,13 +42,13 @@ Current targets in this repository are:
 
 ## Quick start
 
-LiteDbX operations are async-only. Use the explicit open lifecycle and `await` / `await using` for database work and disposal.
+LiteDbX data operations are async. Open can be synchronous or asynchronous; disposal remains async.
 
 The canonical entry points are:
 
-- `await LiteDatabase.Open(...)`
-- `await LiteRepository.Open(...)`
-- `await LiteEngine.Open(...)`
+- `LiteDatabase.Open(...)` / `await LiteDatabase.OpenAsync(...)`
+- `LiteRepository.Open(...)` / `await LiteRepository.OpenAsync(...)`
+- `LiteEngine.Open(...)` / `await LiteEngine.OpenAsync(...)`
 
 ```csharp
 public class Customer
@@ -60,7 +60,7 @@ public class Customer
     public bool IsActive { get; set; }
 }
 
-await using var db = await LiteDatabase.Open(@"MyData.db");
+await using var db = await LiteDatabase.OpenAsync(@"MyData.db");
 
 var customers = db.GetCollection<Customer>("customers");
 
@@ -129,7 +129,7 @@ LiteDbX no longer centers transactions around thread affinity.
 Use `BeginTransaction()` and the returned `ILiteTransaction` scope.
 
 ```csharp
-await using var db = await LiteDatabase.Open(@"MyData.db");
+await using var db = await LiteDatabase.OpenAsync(@"MyData.db");
 var customers = db.GetCollection<Customer>("customers");
 
 await using var tx = await db.BeginTransaction();
@@ -156,18 +156,25 @@ If the transaction scope is disposed before `Commit()`, LiteDbX rolls it back.
 Prefer this pattern everywhere:
 
 ```csharp
-await using var db = await LiteDatabase.Open("filename=my-data.db");
+await using var db = await LiteDatabase.OpenAsync("filename=my-data.db");
+```
+
+If you must cross a synchronous boundary such as a constructor, use:
+
+```csharp
+await using var db = LiteDatabase.Open("filename=my-data.db");
 ```
 
 For repository-style code, prefer:
 
 ```csharp
-await using var repo = await LiteRepository.Open("filename=my-data.db");
+await using var repo = await LiteRepository.OpenAsync("filename=my-data.db");
 ```
 
-Async-only notes:
+Lifecycle notes:
 
-- open databases and repositories through `LiteDatabase.Open(...)`, `LiteRepository.Open(...)`, or `LiteEngine.Open(...)`
+- use `Open(...)` when the caller must stay synchronous
+- use `OpenAsync(...)` when you want non-blocking startup
 - configure runtime pragmas through the async `Pragma(...)` APIs
 - dispose database, repository, engine, transaction, and file-storage handles with `await using` / `DisposeAsync()`
 
@@ -280,7 +287,7 @@ LiteDbX file storage now exposes async-only handles instead of a public `Stream`
 - `Upload(...)` / `Download(...)` remain async
 
 ```csharp
-await using var db = await LiteDatabase.Open(@"MyData.db");
+await using var db = await LiteDatabase.OpenAsync(@"MyData.db");
 
 await using var writer = await db.FileStorage.OpenWrite("readme-demo", "demo.txt");
 await writer.Write(System.Text.Encoding.UTF8.GetBytes("hello LiteDbX"));
@@ -308,7 +315,7 @@ GcmEncryptionRegistration.Register();
 
 var cs = new ConnectionString("filename=secure.db;password=secret;encryption=GCM");
 
-await using var db = await LiteDatabase.Open(cs);
+await using var db = await LiteDatabase.OpenAsync(cs);
 ```
 
 Important notes:
