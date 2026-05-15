@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using FluentAssertions;
 using System.Threading.Tasks;
 using Xunit;
@@ -10,7 +10,7 @@ public class Issue1695_Tests
     [Fact]
     public async Task ICollection_Parameter_Test()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var col = db.GetCollection<StateModel>("col");
 
         ICollection<ObjectId> ids = new List<ObjectId>();

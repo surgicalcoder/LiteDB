@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -10,7 +10,7 @@ public class Delete_By_Name_Tests
     public async Task Delete_By_Name()
     {
         using var f = new TempFile();
-        await using var db = await LiteDatabase.Open(f.Filename);
+        await using var db = await LiteDatabase.OpenAsync(f.Filename);
         var col = db.GetCollection<Person>("Person");
 
         await col.Insert(new Person { Fullname = "John" });

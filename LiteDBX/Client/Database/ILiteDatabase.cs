@@ -8,7 +8,7 @@ using LiteDbX.Engine;
 namespace LiteDbX;
 
 /// <summary>
-/// Async-only public database contract.
+/// Public database contract.
 ///
 /// All data operations, maintenance, and schema management are async.
 /// The former ambient per-thread transaction model (<c>BeginTrans</c>, <c>Commit</c>, <c>Rollback</c>)
@@ -16,7 +16,7 @@ namespace LiteDbX;
 /// <see cref="BeginTransaction"/>.
 ///
 /// Lifecycle:
-/// - Open/create the database with the concrete type's static <c>Open(...)</c> factory.
+/// - Open/create the database with the concrete type's static <c>Open(...)</c> or <c>OpenAsync(...)</c> factory.
 /// - Use <c>await using</c> for deterministic async disposal.
 /// - Use <see cref="Pragma(string, CancellationToken)"/> and
 ///   <see cref="Pragma(string, BsonValue, CancellationToken)"/> for configuration.

@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
@@ -12,7 +12,7 @@ public class FindAll_Tests
     {
         using var f = new TempFile();
 
-        await using (var db = await LiteDatabase.Open(f.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(f.Filename))
         {
             var col = db.GetCollection<Person>("Person");
 
@@ -23,7 +23,7 @@ public class FindAll_Tests
         }
         // close datafile
 
-        await using (var db = await LiteDatabase.Open(f.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(f.Filename))
         {
             var p = await db.GetCollection<Person>("Person")
                              .Find(Query.All("Fullname"))

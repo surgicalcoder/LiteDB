@@ -8,12 +8,10 @@ using System.Threading.Tasks;
 namespace LiteDbX;
 
 /// <summary>
-/// Async-only repository convenience wrapper around <see cref="ILiteDatabase"/>.
+/// Repository convenience wrapper around <see cref="ILiteDatabase"/>.
 /// Implements <see cref="ILiteRepository"/> — all storage operations are async.
-/// Prefer <see cref="Open(string, BsonMapper, CancellationToken)"/>,
-/// <see cref="Open(ConnectionString, BsonMapper, CancellationToken)"/>, or
-/// <see cref="Open(Stream, BsonMapper, Stream, CancellationToken)"/> together with
-/// <c>await using</c>.
+/// Open synchronously with <see cref="Open(string, BsonMapper, CancellationToken)"/> or
+/// asynchronously with <see cref="OpenAsync(string, BsonMapper, CancellationToken)"/>.
 /// </summary>
 public class LiteRepository : ILiteRepository
 {
@@ -26,27 +24,49 @@ public class LiteRepository : ILiteRepository
 
     #region Open
 
-    /// <summary>Open a repository from a connection string using the explicit async-first lifecycle.</summary>
-    public static async ValueTask<LiteRepository> Open(
+    /// <summary>Open a repository from a connection string synchronously.</summary>
+    public static LiteRepository Open(
         string connectionString,
         BsonMapper mapper = null,
         CancellationToken cancellationToken = default)
-        => new(await LiteDatabase.Open(connectionString, mapper, cancellationToken).ConfigureAwait(false));
+        => new(LiteDatabase.Open(connectionString, mapper, cancellationToken));
 
-    /// <summary>Open a repository from a <see cref="ConnectionString"/> using the explicit async-first lifecycle.</summary>
-    public static async ValueTask<LiteRepository> Open(
+    /// <summary>Open a repository from a <see cref="ConnectionString"/> synchronously.</summary>
+    public static LiteRepository Open(
         ConnectionString connectionString,
         BsonMapper mapper = null,
         CancellationToken cancellationToken = default)
-        => new(await LiteDatabase.Open(connectionString, mapper, cancellationToken).ConfigureAwait(false));
+        => new(LiteDatabase.Open(connectionString, mapper, cancellationToken));
 
-    /// <summary>Open a stream-backed repository using the explicit async-first lifecycle.</summary>
-    public static async ValueTask<LiteRepository> Open(
+    /// <summary>Open a stream-backed repository synchronously.</summary>
+    public static LiteRepository Open(
         Stream stream,
         BsonMapper mapper = null,
         Stream logStream = null,
         CancellationToken cancellationToken = default)
-        => new(await LiteDatabase.Open(stream, mapper, logStream, cancellationToken).ConfigureAwait(false));
+        => new(LiteDatabase.Open(stream, mapper, logStream, cancellationToken));
+
+    /// <summary>Open a repository from a connection string asynchronously.</summary>
+    public static async ValueTask<LiteRepository> OpenAsync(
+        string connectionString,
+        BsonMapper mapper = null,
+        CancellationToken cancellationToken = default)
+        => new(await LiteDatabase.OpenAsync(connectionString, mapper, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Open a repository from a <see cref="ConnectionString"/> asynchronously.</summary>
+    public static async ValueTask<LiteRepository> OpenAsync(
+        ConnectionString connectionString,
+        BsonMapper mapper = null,
+        CancellationToken cancellationToken = default)
+        => new(await LiteDatabase.OpenAsync(connectionString, mapper, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Open a stream-backed repository asynchronously.</summary>
+    public static async ValueTask<LiteRepository> OpenAsync(
+        Stream stream,
+        BsonMapper mapper = null,
+        Stream logStream = null,
+        CancellationToken cancellationToken = default)
+        => new(await LiteDatabase.OpenAsync(stream, mapper, logStream, cancellationToken).ConfigureAwait(false));
 
     #endregion
 

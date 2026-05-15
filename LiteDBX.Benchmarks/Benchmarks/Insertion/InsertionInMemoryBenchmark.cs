@@ -22,7 +22,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.Insertion
         {
             File.Delete(DatabasePath);
             _data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize);
-            _databaseInstanceNormal = await LiteDatabase.Open(ConnectionString());
+            _databaseInstanceNormal = await LiteDatabase.OpenAsync(ConnectionString());
             _fileMetaNormalCollection = _databaseInstanceNormal.GetCollection<FileMetaBase>();
         }
 
@@ -30,7 +30,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.Insertion
         public async Task GlobalSetupInMemory()
         {
             _data = FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize);
-            _databaseInstanceInMemory = await LiteDatabase.Open(new System.IO.MemoryStream());
+            _databaseInstanceInMemory = await LiteDatabase.OpenAsync(new System.IO.MemoryStream());
             _fileMetaInMemoryCollection = _databaseInstanceInMemory.GetCollection<FileMetaBase>();
         }
 

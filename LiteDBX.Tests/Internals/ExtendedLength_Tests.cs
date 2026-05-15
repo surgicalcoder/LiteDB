@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace LiteDbX.Internals;
@@ -20,7 +20,7 @@ public class ExtendedLength_Tests
     [Fact]
     public async Task IndexExtendedLength_Tests()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var col = db.GetCollection("customers", BsonAutoId.Int32);
         await col.EnsureIndex("$.Name");
         await col.Insert(new BsonDocument { ["Name"] = new string('A', 1010) });

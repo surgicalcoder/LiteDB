@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -88,7 +88,7 @@ public class Issue2127_Tests
                 Connection = ConnectionType.Direct
             };
 
-            return new ExampleItemRepository(await LiteDatabase.Open(connectionString));
+            return new ExampleItemRepository(await LiteDatabase.OpenAsync(connectionString));
         }
 
         public ValueTask DisposeAsync()

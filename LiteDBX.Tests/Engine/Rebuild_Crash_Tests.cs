@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -35,7 +35,7 @@ namespace LiteDbX.Tests.Engine
 
                 try
                 {
-                    await using (var db = await LiteEngine.Open(settings))
+                    await using (var db = await LiteEngine.OpenAsync(settings))
                     {
                         db.SimulateDiskWriteFail = page =>
                         {
@@ -68,7 +68,7 @@ namespace LiteDbX.Tests.Engine
                     Assert.True(ex is LiteException lex && lex.ErrorCode == 999);
                 }
 
-                await using (var db = await LiteEngine.Open(settings))
+                await using (var db = await LiteEngine.OpenAsync(settings))
                 {
                     var col1 = (await db.Query("col1", Query.All()).ToListAsync()).Count;
                     var col2 = (await db.Query("col2", Query.All()).ToListAsync()).Count;

@@ -2,6 +2,8 @@
 
 `LiteDbX.Migrations` is a raw-BSON migration library for fixing legacy data without depending on typed entity deserialization.
 
+Open the database with `LiteDatabase.Open(...)` when the caller must stay synchronous, or `await LiteDatabase.OpenAsync(...)` when you want non-blocking startup. Migration execution itself remains async.
+
 Use it when you need to:
 
 - convert a field or `_id` from `string` to `ObjectId`
@@ -21,7 +23,7 @@ A migration run starts from `ILiteDatabase`:
 using LiteDbX;
 using LiteDbX.Migrations;
 
-await using var db = await LiteDatabase.Open("app.db");
+await using var db = await LiteDatabase.OpenAsync("app.db");
 
 var report = await db.Migrations()
     .Migration("2026-04-10-cleanup", m => m.ForCollection("customers", c =>
@@ -86,7 +88,7 @@ Changing `_id` is a rebuild/swap migration, because the collection identity has 
 using LiteDbX;
 using LiteDbX.Migrations;
 
-await using var db = await LiteDatabase.Open("app.db");
+await using var db = await LiteDatabase.OpenAsync("app.db");
 
 var report = await db.Migrations()
     .Migration("customers-id-to-objectid", m => m.ForCollection("customers", c =>
@@ -158,7 +160,7 @@ Use `RemoveFieldWhen(...)` with built-in predicates.
 using LiteDbX;
 using LiteDbX.Migrations;
 
-await using var db = await LiteDatabase.Open("app.db");
+await using var db = await LiteDatabase.OpenAsync("app.db");
 
 await db.Migrations()
     .Migration("cleanup-defaults", m => m.ForCollection("customers", c =>

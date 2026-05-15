@@ -207,7 +207,7 @@ public class LockFileEngine : ILiteEngine
                 lockStream = await AcquireWriteLockAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            var engine = await LiteEngine.Open(CreateOperationSettings(requiresWriteAccess), cancellationToken).ConfigureAwait(false);
+            var engine = await LiteEngine.OpenAsync(CreateOperationSettings(requiresWriteAccess), cancellationToken).ConfigureAwait(false);
 
             Lease lease = null;
             LiteEngine engineToDispose = null;

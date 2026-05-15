@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading.Tasks;
@@ -16,7 +16,7 @@ public class ThreadSafety_SmokeStress_Tests
         using var file = new TempFile();
         var expected = new ConcurrentDictionary<int, int>();
 
-        await using (var db = await LiteDatabase.Open(file.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(file.Filename))
         {
             await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
@@ -52,7 +52,7 @@ public class ThreadSafety_SmokeStress_Tests
             await db.Checkpoint();
         }
 
-        await using (var reopened = await LiteDatabase.Open(file.Filename))
+        await using (var reopened = await LiteDatabase.OpenAsync(file.Filename))
         {
             var actual = (await reopened.GetCollection("items").FindAll().ToListAsync())
                 .ToDictionary(x => x["_id"].AsInt32, x => x["value"].AsInt32);

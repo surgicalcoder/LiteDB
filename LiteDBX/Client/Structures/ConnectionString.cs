@@ -129,22 +129,48 @@ public class ConnectionString
 
 
     /// <summary>
-    /// Open an engine using the supported async-first lifecycle.
+    /// Open an engine synchronously from a connection string.
     ///
-    /// This is the canonical lifecycle boundary for connection-string driven engine creation.
     /// Direct mode opens a dedicated <see cref="LiteEngine"/>.
     /// Shared mode returns an in-process serialized wrapper.
     /// LockFile mode returns a physical-file cross-process coordination wrapper.
     /// </summary>
-    internal async ValueTask<ILiteEngine> OpenEngine(
+    internal ILiteEngine OpenEngine(
         Action<EngineSettings> engineSettingsAction = null,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var settings = CreateSettings(engineSettingsAction);
 
         return Connection switch
         {
-            ConnectionType.Direct => await LiteEngine.Open(settings, cancellationToken).ConfigureAwait(false),
+            ConnectionType.Direct => LiteEngine.Open(settings, cancellationToken),
+            ConnectionType.Shared => new SharedEngine(settings),
+            ConnectionType.LockFile => new LockFileEngine(settings),
+            _ => throw new NotImplementedException()
+        };
+    }
+
+    /// <summary>
+    /// Open an engine asynchronously from a connection string.
+    ///
+    /// This is the non-blocking lifecycle boundary for connection-string driven engine creation.
+    /// Direct mode opens a dedicated <see cref="LiteEngine"/>.
+    /// Shared mode returns an in-process serialized wrapper.
+    /// LockFile mode returns a physical-file cross-process coordination wrapper.
+    /// </summary>
+    internal async ValueTask<ILiteEngine> OpenEngineAsync(
+        Action<EngineSettings> engineSettingsAction = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var settings = CreateSettings(engineSettingsAction);
+
+        return Connection switch
+        {
+            ConnectionType.Direct => await LiteEngine.OpenAsync(settings, cancellationToken).ConfigureAwait(false),
             ConnectionType.Shared => new SharedEngine(settings),
             ConnectionType.LockFile => new LockFileEngine(settings),
             _ => throw new NotImplementedException()

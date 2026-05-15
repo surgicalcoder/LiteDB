@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -18,7 +18,7 @@ public class Issue2494_Tests
             Upgrade = true
         };
 
-        await using (var db = await LiteDatabase.Open(connectionString))
+        await using (var db = await LiteDatabase.OpenAsync(connectionString))
         {
             var col = db.GetCollection<PlayerDto>();
 

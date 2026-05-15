@@ -26,7 +26,7 @@ public class LockFileEngine_Tests
         using var file = new TempFile();
         var lockFilename = FileHelper.GetLockFile(file.Filename);
 
-        await using var database = await LiteDatabase.Open(new ConnectionString
+        await using var database = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.LockFile
@@ -54,13 +54,13 @@ public class LockFileEngine_Tests
     {
         using var file = new TempFile();
 
-        await using var first = await LiteDatabase.Open(new ConnectionString
+        await using var first = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.LockFile
         });
 
-        await using var second = await LiteDatabase.Open(new ConnectionString
+        await using var second = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.LockFile
@@ -81,7 +81,7 @@ public class LockFileEngine_Tests
     {
         using var file = new TempFile();
 
-        await using var database = await LiteDatabase.Open(new ConnectionString
+        await using var database = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.LockFile
@@ -98,7 +98,7 @@ public class LockFileEngine_Tests
     {
         using var file = new TempFile();
 
-        await using (var seed = await LiteDatabase.Open(new ConnectionString
+        await using (var seed = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.Direct
@@ -115,7 +115,7 @@ public class LockFileEngine_Tests
 
         var lockFilename = FileHelper.GetLockFile(file.Filename);
 
-        await using var database = await LiteDatabase.Open(new ConnectionString
+        await using var database = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.LockFile,

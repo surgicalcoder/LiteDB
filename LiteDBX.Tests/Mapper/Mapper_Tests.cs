@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
@@ -23,7 +23,7 @@ public class Mapper_Tests
     [Fact]
     public async Task Class_Not_Assignable()
     {
-        await using (var db = await LiteDatabase.Open(":memory:"))
+        await using (var db = await LiteDatabase.OpenAsync(":memory:"))
         {
             var col = db.GetCollection<MyClass>("Test");
             await col.Insert(new MyClass { Id = 1, Member = null });

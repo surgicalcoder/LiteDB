@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -12,7 +12,7 @@ public class Issue2458_Tests
     [Fact]
     public async Task NegativeSeekFails()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var fs = db.FileStorage;
         await AddTestFile("test", 1, fs);
 
@@ -27,7 +27,7 @@ public class Issue2458_Tests
     [Fact]
     public async Task SeekPastFileSucceeds()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var fs = db.FileStorage;
         await AddTestFile("test", 1, fs);
 
@@ -39,7 +39,7 @@ public class Issue2458_Tests
     [Fact]
     public async Task SeekShortChunks()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var fs = db.FileStorage;
 
         // Write three single-byte flushes to produce (at most) three separate buffered regions.

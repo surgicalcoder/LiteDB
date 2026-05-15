@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -35,7 +35,7 @@ public class Issue2298_Tests
 
         var range = new QuantityRange<Mass>(100, 500, Mass.Units.Pound);
         var filename = "Demo.DB";
-        await using var DB = await LiteDatabase.Open(filename);
+        await using var DB = await LiteDatabase.OpenAsync(filename);
         var collection = DB.GetCollection<QuantityRange<Mass>>("DEMO");
         await collection.Insert(range);
         var restored = await collection.FindAll().FirstAsync();

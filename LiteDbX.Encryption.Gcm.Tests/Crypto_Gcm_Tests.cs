@@ -23,7 +23,7 @@ public class Crypto_Gcm_Tests
         var log = new MemoryStream();
         var settings = new EngineSettings { DataStream = data, LogStream = log, Password = "abc", AESEncryption = AESEncryptionType.GCM };
 
-        await using (var e = await LiteEngine.Open(settings))
+        await using (var e = await LiteEngine.OpenAsync(settings))
         {
             await CreateDatabase(e);
 
@@ -55,7 +55,7 @@ public class Crypto_Gcm_Tests
                 AESEncryption = encryptionType
             };
 
-            await using (var engine = await LiteEngine.Open(createSettings))
+            await using (var engine = await LiteEngine.OpenAsync(createSettings))
             {
                 await CreateDatabase(engine);
             }
@@ -71,7 +71,7 @@ public class Crypto_Gcm_Tests
                 AESEncryption = encryptionType == AESEncryptionType.ECB ? AESEncryptionType.GCM : AESEncryptionType.ECB
             };
 
-            await using (var reopenedEngine = await LiteEngine.Open(reopenSettings))
+            await using (var reopenedEngine = await LiteEngine.OpenAsync(reopenSettings))
             {
                 await using (var db = new LiteDatabase(reopenedEngine, disposeOnClose: false))
                 {

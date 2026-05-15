@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -26,7 +26,7 @@ public class PersonQueryData : IAsyncDisposable
     public static async ValueTask<PersonQueryData> CreateAsync()
     {
         var local = DataGen.Person().ToArray();
-        var db = await LiteDatabase.Open(":memory:");
+        var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection<Person>("person");
         await collection.Insert(local);
         return new PersonQueryData(db, collection, local);

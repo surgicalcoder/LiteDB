@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -11,7 +11,7 @@ public class Issue2129_Tests
     [Fact]
     public async Task TestInsertAfterDeleteAll()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var col = db.GetCollection<SwapChance>(nameof(SwapChance));
         await col.EnsureIndex(x => x.Accounts1to2);
         await col.EnsureIndex(x => x.Accounts2to1);

@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace LiteDbX.Tests.Issues;
@@ -10,7 +10,7 @@ public class Issue2534_Tests
     {
         using var file = new TempFile();
 
-        await using LiteDatabase database = await LiteDatabase.Open(new ConnectionString
+        await using LiteDatabase database = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = ConnectionType.Shared

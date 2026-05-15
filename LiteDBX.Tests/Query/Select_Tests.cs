@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -73,7 +73,7 @@ public class Select_Tests
     [Fact]
     public async Task Query_With_No_Collection()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
 
         var reader = await db.Execute("SELECT DAY(NOW()) as DIA");
         await using (reader)

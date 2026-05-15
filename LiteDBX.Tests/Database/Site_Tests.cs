@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
@@ -11,7 +11,7 @@ public class Site_Tests
     public async Task Home_Example()
     {
         using var f = new TempFile();
-        await using var db = await LiteDatabase.Open(f.Filename);
+        await using var db = await LiteDatabase.OpenAsync(f.Filename);
 
         // Get customer collection
         var customers = db.GetCollection<Customer>("customers");

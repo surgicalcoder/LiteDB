@@ -6,15 +6,16 @@ using System.Threading.Tasks;
 namespace LiteDbX.Engine;
 
 /// <summary>
-/// Async-only engine contract.
+/// Engine contract.
 ///
 /// All data access, maintenance, and schema operations are async.
 /// Transactions are represented as explicit <see cref="ILiteTransaction"/> scope objects rather
 /// than ambient per-thread state; this removes the thread-affinity requirement that is
 /// incompatible with <c>await</c>-based continuations.
 ///
-/// Lifecycle is provided by the concrete <see cref="LiteEngine"/> type's static <c>Open(...)</c>
-/// factory, followed by <c>await using</c> / <see cref="IAsyncDisposable.DisposeAsync"/>.
+/// Lifecycle is provided by the concrete <see cref="LiteEngine"/> type's static
+/// <c>Open(...)</c> and <c>OpenAsync(...)</c> factories, followed by <c>await using</c> /
+/// <see cref="IAsyncDisposable.DisposeAsync"/>.
 /// </summary>
 public interface ILiteEngine : IAsyncDisposable
 {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -25,7 +25,7 @@ public class PersonGroupByData : IAsyncDisposable
     public static async ValueTask<PersonGroupByData> CreateAsync()
     {
         var local = DataGen.Person(1, 1000).ToArray();
-        var db = await LiteDatabase.Open(new MemoryStream());
+        var db = await LiteDatabase.OpenAsync(new MemoryStream());
         var collection = db.GetCollection<Person>();
         await collection.Insert(local);
         await collection.EnsureIndex(x => x.Age);

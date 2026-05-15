@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using Xunit;
@@ -24,7 +24,7 @@ public class Issue1585a_Tests
     [Fact]
     public async Task Dto_Read()
     {
-        await using (var db = await LiteDatabase.Open(new MemoryStream()))
+        await using (var db = await LiteDatabase.OpenAsync(new MemoryStream()))
         {
             var id = Guid.NewGuid();
             var col = db.GetCollection<PlayerDto>();
@@ -37,7 +37,7 @@ public class Issue1585a_Tests
     [Fact]
     public async Task Dto_Read1()
     {
-        await using (var db = await LiteDatabase.Open(new MemoryStream()))
+        await using (var db = await LiteDatabase.OpenAsync(new MemoryStream()))
         {
             var id = Guid.NewGuid();
             var col = db.GetCollection<PlayerDto>();
@@ -50,7 +50,7 @@ public class Issue1585a_Tests
     [Fact]
     public async Task Dto_Read2()
     {
-        await using (var db = await LiteDatabase.Open(new MemoryStream()))
+        await using (var db = await LiteDatabase.OpenAsync(new MemoryStream()))
         {
             var id = Guid.NewGuid();
             var col = db.GetCollection<PlayerDto>();
@@ -66,7 +66,7 @@ public class Issue1585b_Tests
     [Fact]
     public async Task Dto_Read3()
     {
-        await using (var db = await LiteDatabase.Open(new MemoryStream()))
+        await using (var db = await LiteDatabase.OpenAsync(new MemoryStream()))
         {
             var id = Guid.NewGuid();
             var col = db.GetCollection<PlayerDto>();
@@ -79,7 +79,7 @@ public class Issue1585b_Tests
     [Fact]
     public async Task Dto_Read4()
     {
-        await using (var db = await LiteDatabase.Open(new MemoryStream()))
+        await using (var db = await LiteDatabase.OpenAsync(new MemoryStream()))
         {
             var id = Guid.NewGuid();
             var col = db.GetCollection<PlayerDto>();
@@ -92,7 +92,7 @@ public class Issue1585b_Tests
     [Fact]
     public async Task Dto_Read5()
     {
-        await using (var db = await LiteDatabase.Open(new MemoryStream()))
+        await using (var db = await LiteDatabase.OpenAsync(new MemoryStream()))
         {
             var id = Guid.NewGuid();
             var col = db.GetCollection<PlayerDto>();

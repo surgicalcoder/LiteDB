@@ -1,4 +1,4 @@
-﻿using System.Threading;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace LiteDbX.Engine;
@@ -10,7 +10,7 @@ public partial class LiteEngine
     ///
     /// Phase 6: uses <see cref="CloseAsync"/> and <see cref="RebuildService.RebuildAsync"/>
     /// so no thread is blocked during the rebuild I/O. Re-opening after the rebuild now
-    /// uses the explicit async-native startup lifecycle via <c>LiteEngine.Open(...)</c> internals.
+    /// uses the explicit async-native startup lifecycle via <c>LiteEngine.OpenAsync(...)</c> internals.
     /// </summary>
     public async ValueTask<long> Rebuild(RebuildOptions options, CancellationToken cancellationToken = default)
     {

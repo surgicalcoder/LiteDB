@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
@@ -34,7 +34,7 @@ public class TestExecution
             DeleteFiles();
         }
 
-        _db = await LiteDatabase.Open(_file.Filename).ConfigureAwait(false);
+        _db = await LiteDatabase.OpenAsync(_file.Filename).ConfigureAwait(false);
         await _db.Pragma("TIMEOUT", (int)_file.Timeout.TotalSeconds).ConfigureAwait(false);
 
         foreach (var setup in _file.Setup)

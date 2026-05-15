@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using System.Threading.Tasks;
 using LiteDbX.Engine;
 using Xunit;
@@ -12,14 +12,14 @@ public class UserVersion_Tests
     {
         using var file = new TempFile();
 
-        await using (var db = await LiteDatabase.Open(file.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(file.Filename))
         {
             (await db.Pragma(Pragmas.USER_VERSION)).AsInt32.Should().Be(0);
             await db.Pragma(Pragmas.USER_VERSION, 5);
             await db.Checkpoint();
         }
 
-        await using (var db = await LiteDatabase.Open(file.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(file.Filename))
         {
             (await db.Pragma(Pragmas.USER_VERSION)).AsInt32.Should().Be(5);
         }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -44,7 +44,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.WAL
                 AESEncryption = encryptionMode == WalEncryptionMode.Gcm ? AESEncryptionType.GCM : AESEncryptionType.ECB
             };
 
-            DatabaseInstance = await LiteDatabase.Open(connectionString).ConfigureAwait(false);
+            DatabaseInstance = await LiteDatabase.OpenAsync(connectionString).ConfigureAwait(false);
             await DatabaseInstance.Pragma(Pragmas.CHECKPOINT, checkpointSize).ConfigureAwait(false);
         }
 

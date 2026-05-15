@@ -58,7 +58,7 @@ internal class RebuildService
         {
             reader.Open();
 
-            await using var engine = await LiteEngine.Open(new EngineSettings
+            await using var engine = await LiteEngine.OpenAsync(new EngineSettings
             {
                 Filename   = tempFilename,
                 Collation  = options.Collation,

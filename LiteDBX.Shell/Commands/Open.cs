@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 
 namespace LiteDbX.Shell.Commands;
 
@@ -29,6 +29,6 @@ internal class Open : IShellCommand
             env.Database = null;
         }
 
-        env.Database = await LiteDatabase.Open(connectionString);
+        env.Database = await LiteDatabase.OpenAsync(connectionString);
     }
 }

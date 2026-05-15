@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -17,7 +17,7 @@ public class IndexSortAndFilterTest : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _database = await LiteDatabase.Open(_tempFile.Filename);
+        _database = await LiteDatabase.OpenAsync(_tempFile.Filename);
         _collection = _database.GetCollection<Item>("items");
 
         await _collection.Upsert(new Item { Id = "C", Value = "Value 1" });

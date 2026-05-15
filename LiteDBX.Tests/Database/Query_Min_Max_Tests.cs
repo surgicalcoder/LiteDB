@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -11,7 +11,7 @@ public class Query_Min_Max_Tests
     {
         using (var f = new TempFile())
         {
-            await using (var db = await LiteDatabase.Open(f.Filename))
+            await using (var db = await LiteDatabase.OpenAsync(f.Filename))
             {
                 var c = db.GetCollection<EntityMinMax>("col");
 

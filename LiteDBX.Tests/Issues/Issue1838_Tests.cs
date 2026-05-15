@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
@@ -10,7 +10,7 @@ public class Issue1838_Tests
     [Fact]
     public async Task Find_ByDatetime_Offset()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection<TestType>(nameof(TestType));
 
         // sample data

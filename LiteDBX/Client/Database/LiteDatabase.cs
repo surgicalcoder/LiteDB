@@ -12,13 +12,18 @@ namespace LiteDbX;
 /// The LiteDBX database. Used for creating a LiteDBX instance and using all storage resources.
 ///
 /// Phase 4: Updated to implement <see cref="ILiteDatabase"/>.
-/// All data operations, transactions, maintenance, and SQL execution are now async-only.
+/// Open/create can be done synchronously with <see cref="Open(string, BsonMapper, CancellationToken)"/>
+/// or asynchronously with <see cref="OpenAsync(string, BsonMapper, CancellationToken)"/>.
+/// All data operations, transactions, maintenance, and SQL execution remain async.
 /// The former synchronous ambient-transaction API (BeginTrans/Commit/Rollback) is removed;
 /// use <see cref="BeginTransaction"/> and the returned <see cref="ILiteTransaction"/> instead.
 ///
-/// The supported lifecycle is <see cref="Open(string, BsonMapper, CancellationToken)"/>,
-/// <see cref="Open(ConnectionString, BsonMapper, CancellationToken)"/>, or
-/// <see cref="Open(Stream, BsonMapper, Stream, CancellationToken)"/> together with
+/// The supported lifecycle is <see cref="Open(string, BsonMapper, CancellationToken)"/> /
+/// <see cref="OpenAsync(string, BsonMapper, CancellationToken)"/>,
+/// <see cref="Open(ConnectionString, BsonMapper, CancellationToken)"/> /
+/// <see cref="OpenAsync(ConnectionString, BsonMapper, CancellationToken)"/>, or
+/// <see cref="Open(Stream, BsonMapper, Stream, CancellationToken)"/> /
+/// <see cref="OpenAsync(Stream, BsonMapper, Stream, CancellationToken)"/> together with
 /// <c>await using</c>. Configuration is async-only via <see cref="Pragma(string, CancellationToken)"/>
 /// and <see cref="Pragma(string, BsonValue, CancellationToken)"/>.
 /// </summary>
@@ -29,38 +34,79 @@ public class LiteDatabase : ILiteDatabase
     private ILiteStorage<string> _fs;
 
     /// <summary>
-    /// Open a database from a connection string using the supported async-first lifecycle.
+    /// Open a database from a connection string synchronously.
     /// </summary>
-    public static ValueTask<LiteDatabase> Open(
+    public static LiteDatabase Open(
         string connectionString,
         BsonMapper mapper = null,
         CancellationToken cancellationToken = default)
         => Open(new ConnectionString(connectionString), mapper, cancellationToken);
 
     /// <summary>
-    /// Open a database from a parsed <see cref="ConnectionString"/> using the supported async-first lifecycle.
+    /// Open a database from a parsed <see cref="ConnectionString"/> synchronously.
     /// </summary>
-    public static async ValueTask<LiteDatabase> Open(
+    public static LiteDatabase Open(
         ConnectionString connectionString,
         BsonMapper mapper = null,
         CancellationToken cancellationToken = default)
     {
         if (connectionString == null) throw new ArgumentNullException(nameof(connectionString));
 
-        var engine = await connectionString.OpenEngine(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var engine = connectionString.OpenEngine(cancellationToken: cancellationToken);
         return new LiteDatabase(engine, mapper, disposeOnClose: true);
     }
 
     /// <summary>
-    /// Open a stream-backed database using the supported async-first lifecycle.
+    /// Open a database from a connection string asynchronously.
     /// </summary>
-    public static async ValueTask<LiteDatabase> Open(
+    public static ValueTask<LiteDatabase> OpenAsync(
+        string connectionString,
+        BsonMapper mapper = null,
+        CancellationToken cancellationToken = default)
+        => OpenAsync(new ConnectionString(connectionString), mapper, cancellationToken);
+
+    /// <summary>
+    /// Open a database from a parsed <see cref="ConnectionString"/> asynchronously.
+    /// </summary>
+    public static async ValueTask<LiteDatabase> OpenAsync(
+        ConnectionString connectionString,
+        BsonMapper mapper = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (connectionString == null) throw new ArgumentNullException(nameof(connectionString));
+
+        var engine = await connectionString.OpenEngineAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        return new LiteDatabase(engine, mapper, disposeOnClose: true);
+    }
+
+    /// <summary>
+    /// Open a stream-backed database synchronously.
+    /// </summary>
+    public static LiteDatabase Open(
         Stream stream,
         BsonMapper mapper = null,
         Stream logStream = null,
         CancellationToken cancellationToken = default)
     {
-        var engine = await LiteEngine.Open(new EngineSettings
+        var engine = LiteEngine.Open(new EngineSettings
+        {
+            DataStream = stream ?? throw new ArgumentNullException(nameof(stream)),
+            LogStream = logStream
+        }, cancellationToken);
+
+        return new LiteDatabase(engine, mapper, disposeOnClose: true);
+    }
+
+    /// <summary>
+    /// Open a stream-backed database asynchronously.
+    /// </summary>
+    public static async ValueTask<LiteDatabase> OpenAsync(
+        Stream stream,
+        BsonMapper mapper = null,
+        Stream logStream = null,
+        CancellationToken cancellationToken = default)
+    {
+        var engine = await LiteEngine.OpenAsync(new EngineSettings
         {
             DataStream = stream ?? throw new ArgumentNullException(nameof(stream)),
             LogStream = logStream

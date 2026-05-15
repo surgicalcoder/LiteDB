@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -10,7 +10,7 @@ public class Issue2265_Tests
     [Fact]
     public async Task Test()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var c = db.GetCollection<Weights>("weights");
         var w = await c.FindOne(x => true);
 

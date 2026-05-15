@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
@@ -12,7 +12,7 @@ public class Issue1651_Tests
     {
         BsonMapper.Global.Entity<Order>().DbRef(order => order.Customer);
 
-        await using var _database = await LiteDatabase.Open(":memory:");
+        await using var _database = await LiteDatabase.OpenAsync(":memory:");
         var _orderCollection = _database.GetCollection<Order>("Order");
         var _customerCollection = _database.GetCollection<Customer>("Customer");
 

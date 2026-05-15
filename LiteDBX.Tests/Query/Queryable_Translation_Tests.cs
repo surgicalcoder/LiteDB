@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Threading.Tasks;
@@ -174,7 +174,7 @@ public class Queryable_Translation_Tests
     [Fact]
     public async Task Queryable_AsQueryable_With_Explicit_Transaction_Preserves_Transaction_And_Parity()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection<Person>("person");
         var local = DataGen.Person().ToArray();
 

@@ -18,7 +18,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.Queries
         public async Task GlobalSetupSimpleIndexBaseline()
         {
             File.Delete(DatabasePath);
-            DatabaseInstance = await LiteDatabase.Open(ConnectionString());
+            DatabaseInstance = await LiteDatabase.OpenAsync(ConnectionString());
             _fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
             await _fileMetaCollection.EnsureIndex(fileMeta => fileMeta.ShouldBeShown);
             await _fileMetaCollection.EnsureIndex(fileMeta => fileMeta.IsFavorite);
@@ -29,7 +29,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.Queries
         [GlobalSetup(Target = nameof(Query_CompoundIndexVariant))]
         public async Task GlobalSetupCompoundIndexVariant()
         {
-            DatabaseInstance = await LiteDatabase.Open(ConnectionString());
+            DatabaseInstance = await LiteDatabase.OpenAsync(ConnectionString());
             _fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
             await _fileMetaCollection.EnsureIndex(COMPOUND_INDEX_NAME, $"$.{nameof(FileMetaBase.IsFavorite)};$.{nameof(FileMetaBase.ShouldBeShown)}");
             await _fileMetaCollection.Insert(FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize));

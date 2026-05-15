@@ -13,7 +13,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RunAsync_ShouldApplyInPlaceMutationsAcrossWildcardSelectedCollections()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
 
         var tenantOne = db.GetCollection("tenant_one");
         var tenantTwo = db.GetCollection("tenant_two");
@@ -83,7 +83,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RunAsync_ShouldSkipAlreadyAppliedMigration()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -109,7 +109,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RunAsync_ShouldExcludeMigrationInfrastructureCollectionsFromWildcardSelection()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var users = db.GetCollection("users");
 
         await users.Insert(new BsonDocument
@@ -140,7 +140,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertField_WhenInvalidAndGenerateNewId_ShouldReplaceValue()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -163,7 +163,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertField_ShouldSupportIndexedArrayDocumentPath()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -198,7 +198,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertField_ShouldSupportIndexedArrayValuePath()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -226,7 +226,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertField_ShouldSupportWildcardArrayDocumentPath()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -259,7 +259,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertField_ShouldSupportRecursivePathAcrossDocumentsAndArrays()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -305,7 +305,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task DryRun_ShouldReportInvalidFieldConversionSamples_WithConcretePaths()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -344,7 +344,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task DryRun_ShouldCapInvalidFieldConversionSamples_PerCollection()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
         var values = new BsonArray();
 
@@ -378,7 +378,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetFieldWhen_ShouldOverwriteExistingNestedValue_WhenParentExists()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -403,7 +403,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetFieldWhen_ShouldNotCreateMissingParents_InV1()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -424,7 +424,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetFieldWhen_ShouldCreateMissingNestedParents_WhenEnabled()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -449,7 +449,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task AddFieldWhen_ShouldCreateMissingNestedParents_ForWildcardElements_WhenEnabled()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -492,7 +492,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetFieldWhen_ShouldRespectExistingOnlyWriteMode()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -529,7 +529,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetFieldWhen_ShouldRespectNullOrMissingWriteMode()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -577,7 +577,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task IndexedPaths_ShouldBeSafeNoOp_ForMixedShapesAndOutOfRangeIndexes()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -615,7 +615,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetDefaultWhenMissing_ShouldSupportWildcardArrayDocumentPath()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -645,7 +645,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetFieldWhen_ShouldSupportWildcardArrayDocumentPath()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -675,7 +675,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RecursiveConvertField_ShouldBeSafeNoOp_ForMixedShapesWithoutMatches()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -703,7 +703,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task CopyField_ShouldDeepCloneDocument_AndPreserveSource()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -737,7 +737,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RenameField_ShouldMoveValue_AndRemoveSource()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -764,7 +764,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task MoveField_ShouldNotOverwriteExistingTarget()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -796,7 +796,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetDefaultWhenMissing_ShouldAddValueOnlyWhenMissing()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -829,7 +829,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertId_ShouldRebuildCollection_PreserveIndexes_AndApplyDocumentOperations()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.EnsureIndex("idx_code", BsonExpression.Create("Code"), cancellationToken: default);
@@ -884,7 +884,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertId_WhenInvalidAndGenerateNewId_ShouldWriteDurableRemapEntry()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -914,7 +914,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task DryRun_Rebuild_ShouldReportDuplicateTargetIdSamples_WithoutCreatingArtifacts()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -961,7 +961,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertId_ShouldThrow_OnDuplicateTargetIds_DuringRealRun()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -986,7 +986,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RepairReference_ShouldUseDurableRemapLog_InLaterMigrationRun()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
         var orders = db.GetCollection("orders");
 
@@ -1022,7 +1022,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RepairReference_ShouldHonorDbRefCollectionGuard()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
         var invoices = db.GetCollection("invoices");
 
@@ -1072,7 +1072,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RepairReference_ShouldSupportPairedWildcardDbRefPaths()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
         var invoices = db.GetCollection("invoices");
 
@@ -1133,7 +1133,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RepairReference_WildcardPair_ShouldSkipMissingSiblingGuardPaths()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
         var invoices = db.GetCollection("invoices");
 
@@ -1180,7 +1180,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertId_ReportShouldExposeBackupCollectionName_AndGeneratedMappingsPerCollection()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -1202,7 +1202,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RemoveDocumentWhen_ShouldDeleteMatchingDocuments_InPlace()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1238,7 +1238,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RemoveFieldWhen_ShouldPruneEmptyIndexedContainers_WhenEnabled()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1269,7 +1269,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RemoveFieldWhen_ShouldSupportWildcardPruningAcrossArrayElements()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1312,7 +1312,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RemoveFieldWhen_ShouldSupportRecursivePruningAcrossNestedContainers()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1363,7 +1363,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RemoveWhere_And_PruneEmptyContainers_ShouldApplyCollectionWideRecursiveCleanup()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1416,7 +1416,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RemoveWhere_ShouldRecursivelyRemoveAggressiveUselessValues()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1464,7 +1464,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RenameField_ShouldSupportPairedWildcardPaths()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1494,7 +1494,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task SetFieldWhen_ShouldSupportRecursivePaths()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1563,7 +1563,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ModifyDocumentWhen_ShouldReplaceWholeDocument_WhilePreservingId()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1594,7 +1594,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ModifyDocumentWhen_ShouldThrow_WhenMutatorChangesId()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1620,7 +1620,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RemoveDocumentWhen_ShouldWorkDuringRebuildBeforeIdConversion()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("customers");
 
         await collection.Insert(new BsonDocument
@@ -1661,7 +1661,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task DryRun_ShouldPreviewInPlaceMutations_WithoutPersistingChangesOrHistory()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -1697,7 +1697,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task DryRun_ShouldPreviewRebuildWithoutCreatingBackupsOrRemapRows()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -1743,7 +1743,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task ConvertId_NoOpRebuild_ShouldNotExposeValidationSummary()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -1766,7 +1766,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task DryRun_Rebuild_ShouldCapPlannedSecondaryIndexReplayDetails()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -1796,7 +1796,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task BackupRetention_DeleteOnSuccess_ShouldRemoveBackupCollectionAfterSwap()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -1822,7 +1822,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RunAsync_WithExplicitOptions_ShouldPreserveRunnerDefaultBackupRetention_WhenNotOverridden()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument
@@ -1847,7 +1847,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task CleanupBackupsAsync_ShouldDeleteMatchingBackupsOnly()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
         var orders = db.GetCollection("orders");
 
@@ -1874,7 +1874,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task CleanupBackupsAsync_DryRun_ShouldReportWithoutDeleting()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument { ["_id"] = new BsonValue("bad-customer-id") });
@@ -1896,7 +1896,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task CleanupBackupsAsync_KeepLatestCount_ShouldRetainNewestMatchingBackups()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument { ["_id"] = new BsonValue("bad-customer-id"), ["Version"] = new BsonValue(0) });
@@ -1944,7 +1944,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task CleanupBackupsAsync_KeepLatestCount_DryRun_ShouldPlanOnlyOlderBackups()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
 
         await customers.Insert(new BsonDocument { ["_id"] = new BsonValue("bad-customer-id"), ["Version"] = new BsonValue(0) });
@@ -1979,7 +1979,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task WildcardMigrations_ShouldSkipBackupArtifactsByDefault()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var customers = db.GetCollection("customers");
         var users = db.GetCollection("users");
 
@@ -2002,7 +2002,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task InsertDocumentWhen_ShouldSeedMissingDocument_AndReportInsertedCount()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -2031,7 +2031,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task InsertDocumentWhen_ShouldSkipExistingDocumentId_ByDefault()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -2059,7 +2059,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task UseStrictPathResolution_ShouldThrowOnStructuralPathMismatch()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -2081,7 +2081,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RunAsync_WithExplicitOptions_ShouldPreserveRunnerDefaultStrictPathResolution_WhenNotOverridden()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
 
         await collection.Insert(new BsonDocument
@@ -2103,7 +2103,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RunAsync_ShouldEmitProgressCallbacks()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
         var progress = new List<MigrationProgress>();
 
@@ -2131,7 +2131,7 @@ public class MigrationRunner_Tests
     [Fact]
     public async Task RunAsync_WithExplicitOptions_ShouldPreserveRunnerDefaultProgressCallback_WhenNotOverridden()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection("tenant_one");
         var progress = new List<MigrationProgress>();
 

@@ -18,12 +18,27 @@ namespace LiteDbX.Engine;
 public partial class LiteEngine : ILiteEngine
 {
     /// <summary>
-    /// Explicit async-first engine open boundary.
+    /// Synchronous engine open boundary.
+    ///
+    /// Recovery, upgrade detection, rebuild reopen, and WAL restore are completed before the
+    /// engine instance is returned.
+    /// </summary>
+    public static LiteEngine Open(EngineSettings settings, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var engine = new LiteEngine(settings);
+        engine.OpenInstance(cancellationToken).GetAwaiter().GetResult();
+        return engine;
+    }
+
+    /// <summary>
+    /// Asynchronous engine open boundary.
     ///
     /// Recovery, upgrade detection, rebuild reopen, and WAL restore now run on this awaitable
     /// startup path.
     /// </summary>
-    public static async ValueTask<LiteEngine> Open(EngineSettings settings, CancellationToken cancellationToken = default)
+    public static async ValueTask<LiteEngine> OpenAsync(EngineSettings settings, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 

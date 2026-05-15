@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -10,7 +10,7 @@ public class MissingIdDocTest
     public async Task MissingIdDoc_Test()
     {
         using var file = new TempFile();
-        await using var db = await LiteDatabase.Open(file.Filename);
+        await using var db = await LiteDatabase.OpenAsync(file.Filename);
         var col = db.GetCollection<MissingIdDoc>("col");
 
         var p = new MissingIdDoc { Name = "John", Age = 39 };

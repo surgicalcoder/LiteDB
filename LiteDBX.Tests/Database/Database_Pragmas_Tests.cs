@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using FluentAssertions;
 using System.Threading.Tasks;
@@ -12,7 +12,7 @@ public class Database_Pragmas_Tests
     [Fact]
     public async Task Database_Pragmas_Get_Set()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
 
         TimeSpan.FromSeconds((await db.Pragma(Pragmas.TIMEOUT)).AsInt32).TotalSeconds.Should().Be(60.0);
         (await db.Pragma(Pragmas.UTC_DATE)).AsBoolean.Should().Be(false);

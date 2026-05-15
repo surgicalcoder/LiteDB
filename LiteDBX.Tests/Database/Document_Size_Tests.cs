@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -14,7 +14,7 @@ public class Document_Size_Tests
     public async Task Very_Large_Single_Document_Support_With_Partial_Load_Memory_Usage()
     {
         using var file = new TempFile();
-        await using var db = await LiteDatabase.Open(file.Filename);
+        await using var db = await LiteDatabase.OpenAsync(file.Filename);
         var col = db.GetCollection("col");
 
         await col.Insert(new BsonDocument

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -14,8 +14,8 @@ public class ThreadSafety_LockFileMode_Tests
     {
         using var file = new TempFile();
 
-        await using var first = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
-        await using var second = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
+        await using var first = await LiteDatabase.OpenAsync(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
+        await using var second = await LiteDatabase.OpenAsync(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
 
         await first.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
         await second.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
@@ -46,7 +46,7 @@ public class ThreadSafety_LockFileMode_Tests
         var tasks = Enumerable.Range(0, 4)
             .Select(worker => ConcurrencyTestHelper.RunIsolated(async () =>
             {
-                await using var db = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
+                await using var db = await LiteDatabase.OpenAsync(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
                 await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
                 var col = db.GetCollection("items");
 
@@ -63,7 +63,7 @@ public class ThreadSafety_LockFileMode_Tests
 
         await Task.WhenAll(tasks);
 
-        await using var verify = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
+        await using var verify = await LiteDatabase.OpenAsync(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
         var rows = await verify.GetCollection("items").FindAll().ToListAsync();
         rows.Should().HaveCount(20);
         rows.Select(x => x["_id"].AsInt32).Distinct().Should().HaveCount(20);
@@ -76,21 +76,21 @@ public class ThreadSafety_LockFileMode_Tests
 
         var readerTask = ConcurrencyTestHelper.RunIsolated(async () =>
         {
-            await using var db = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
+            await using var db = await LiteDatabase.OpenAsync(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
             await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
             return await db.GetCollection("items").Count();
         });
 
         var writerTask = ConcurrencyTestHelper.RunIsolated(async () =>
         {
-            await using var db = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
+            await using var db = await LiteDatabase.OpenAsync(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
             await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(5).TotalSeconds);
             await db.GetCollection("items").Insert(new BsonDocument { ["_id"] = 1 });
         });
 
         await Task.WhenAll(readerTask, writerTask);
 
-        await using var verify = await LiteDatabase.Open(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
+        await using var verify = await LiteDatabase.OpenAsync(ConcurrencyTestHelper.CreateConnectionString(file, ConnectionType.LockFile));
         (await verify.GetCollection("items").Count()).Should().Be(1);
     }
 }

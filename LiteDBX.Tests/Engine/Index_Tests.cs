@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -11,7 +11,7 @@ public class Index_Tests
     [Fact]
     public async Task Index_With_No_Name()
     {
-        await using var db = await LiteDatabase.Open("filename=:memory:");
+        await using var db = await LiteDatabase.OpenAsync("filename=:memory:");
         var users   = db.GetCollection("users");
         var indexes = db.GetCollection("$indexes");
 
@@ -29,7 +29,7 @@ public class Index_Tests
     [Fact]
     public async Task Index_Order()
     {
-        await using var db = await LiteDatabase.Open("filename=:memory:");
+        await using var db = await LiteDatabase.OpenAsync("filename=:memory:");
         var col     = db.GetCollection("col");
         var indexes = db.GetCollection("$indexes");
 
@@ -56,7 +56,7 @@ public class Index_Tests
     [Fact]
     public async Task Index_With_Like()
     {
-        await using var db = await LiteDatabase.Open("filename=:memory:");
+        await using var db = await LiteDatabase.OpenAsync("filename=:memory:");
         var col = db.GetCollection("names", BsonAutoId.Int32);
 
         await col.Insert(new[]
@@ -96,7 +96,7 @@ public class Index_Tests
     [Fact]
     public async Task EnsureIndex_Invalid_Arguments()
     {
-        await using var db   = await LiteDatabase.Open("filename=:memory:");
+        await using var db   = await LiteDatabase.OpenAsync("filename=:memory:");
         var test = db.GetCollection("test");
 
         // null name — EnsureIndex(string name, BsonExpression) validates eagerly
@@ -118,7 +118,7 @@ public class Index_Tests
     [Fact]
     public async Task MultiKey_Index_Test()
     {
-        await using var db  = await LiteDatabase.Open("filename=:memory:");
+        await using var db  = await LiteDatabase.OpenAsync("filename=:memory:");
         var col = db.GetCollection("customers", BsonAutoId.Int32);
         await col.EnsureIndex("$.Phones[*].Type");
 

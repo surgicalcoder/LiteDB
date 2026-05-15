@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -13,7 +13,7 @@ public class IndexMultiKeyIndex
     [Fact]
     public async Task Index_Multikey_Using_Linq()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         var col = db.GetCollection<User>();
 
         await col.Insert(new User { Name = "John Doe", Phones = new[] { 1, 3, 5 }, Addresses = new List<Address> { new() { Street = "Av.1" }, new() { Street = "Av.3" } } });

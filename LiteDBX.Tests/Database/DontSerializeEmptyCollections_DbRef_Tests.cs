@@ -22,7 +22,7 @@ public class DontSerializeEmptyCollections_DbRef_Tests
             .DbRef(x => x.ProductsNullOnly, "products")
             .DbRef(x => x.ProductsSingle, "products");
 
-        await using var db = await LiteDatabase.Open(new MemoryStream(), mapper, new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream(), mapper, new MemoryStream());
         var products = db.GetCollection<DbRefProduct>("products");
         var orders = db.GetCollection<DbRefOrder>("orders");
         var rawOrders = db.GetCollection("orders");

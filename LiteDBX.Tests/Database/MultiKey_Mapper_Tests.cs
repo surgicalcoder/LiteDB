@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -11,7 +11,7 @@ public class MultiKey_Mapper_Tests
     [Fact]
     public async Task MultiKey_Mapper()
     {
-        await using (var db = await LiteDatabase.Open(":memory:"))
+        await using (var db = await LiteDatabase.OpenAsync(":memory:"))
         {
             var col = db.GetCollection<MultiKeyDoc>("col");
 

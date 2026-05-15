@@ -17,7 +17,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.Queries
         public async Task GlobalSetup()
         {
             File.Delete(DatabasePath);
-            DatabaseInstance = await LiteDatabase.Open(ConnectionString());
+            DatabaseInstance = await LiteDatabase.OpenAsync(ConnectionString());
             _fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
             await _fileMetaCollection.Insert(FileMetaGenerator<FileMetaBase>.GenerateList(DatasetSize));
             await DatabaseInstance.Checkpoint();

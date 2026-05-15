@@ -20,7 +20,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.Queries
         public async Task GlobalSetup()
         {
             File.Delete(DatabasePath);
-            DatabaseInstance = await LiteDatabase.Open(ConnectionString());
+            DatabaseInstance = await LiteDatabase.OpenAsync(ConnectionString());
             _fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
             await _fileMetaCollection.EnsureIndex(fileMeta => fileMeta.ValidFrom);
             await _fileMetaCollection.EnsureIndex(fileMeta => fileMeta.ValidTo);

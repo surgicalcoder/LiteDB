@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -19,7 +19,7 @@ public class ThreadSafety_WalCheckpoint_Tests
         using var file = new TempFile();
         var expectedIds = Enumerable.Range(1, 80).ToArray();
 
-        await using (var db = await LiteDatabase.Open(file.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(file.Filename))
         {
             await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
@@ -46,7 +46,7 @@ public class ThreadSafety_WalCheckpoint_Tests
             (await col.Count()).Should().Be(expectedIds.Length);
         }
 
-        await using (var reopened = await LiteDatabase.Open(file.Filename))
+        await using (var reopened = await LiteDatabase.OpenAsync(file.Filename))
         {
             var ids = (await reopened.GetCollection("items").FindAll().ToListAsync())
                 .Select(x => x["_id"].AsInt32)
@@ -63,7 +63,7 @@ public class ThreadSafety_WalCheckpoint_Tests
         using var file = new TempFile();
         var expectedIds = new ConcurrentBag<int>();
 
-        await using (var db = await LiteDatabase.Open(file.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(file.Filename))
         {
             await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
@@ -113,7 +113,7 @@ public class ThreadSafety_WalCheckpoint_Tests
 
         var expected = expectedIds.OrderBy(x => x).ToArray();
 
-        await using (var reopened = await LiteDatabase.Open(file.Filename))
+        await using (var reopened = await LiteDatabase.OpenAsync(file.Filename))
         {
             var actual = (await reopened.GetCollection("items").FindAll().ToListAsync())
                 .Select(x => x["_id"].AsInt32)
@@ -129,7 +129,7 @@ public class ThreadSafety_WalCheckpoint_Tests
     {
         using var file = new TempFile();
 
-        await using var db = await LiteDatabase.Open(file.Filename);
+        await using var db = await LiteDatabase.OpenAsync(file.Filename);
         await db.Pragma(Pragmas.CHECKPOINT, 0);
         var col = db.GetCollection("items");
         var writerHolding = new SemaphoreSlim(0, 1);
@@ -165,7 +165,7 @@ public class ThreadSafety_WalCheckpoint_Tests
     {
         using var file = new TempFile();
 
-        await using (var db = await LiteDatabase.Open(file.Filename))
+        await using (var db = await LiteDatabase.OpenAsync(file.Filename))
         {
             await db.Pragma(Pragmas.CHECKPOINT, 0);
             var col = db.GetCollection("items");
@@ -179,7 +179,7 @@ public class ThreadSafety_WalCheckpoint_Tests
             (await col.Count()).Should().Be(25);
         }
 
-        await using (var reopened = await LiteDatabase.Open(file.Filename))
+        await using (var reopened = await LiteDatabase.OpenAsync(file.Filename))
         {
             var rows = await reopened.GetCollection("items").FindAll().ToListAsync();
             rows.Should().HaveCount(25);
@@ -193,7 +193,7 @@ public class ThreadSafety_WalCheckpoint_Tests
         using var file = new TempFile();
         var observedCounts = new ConcurrentQueue<int>();
 
-        await using var db = await LiteDatabase.Open(file.Filename);
+        await using var db = await LiteDatabase.OpenAsync(file.Filename);
         await db.Pragma(Pragmas.CHECKPOINT, 0);
         var col = db.GetCollection("items");
         using var cts = new CancellationTokenSource();

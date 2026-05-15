@@ -18,7 +18,7 @@ namespace LiteDbX.Benchmarks.Benchmarks.Deletion
         public async Task GlobalSetup()
         {
             File.Delete(DatabasePath);
-            DatabaseInstance = await LiteDatabase.Open(ConnectionString());
+            DatabaseInstance = await LiteDatabase.OpenAsync(ConnectionString());
             _fileMetaCollection = DatabaseInstance.GetCollection<FileMetaBase>();
             await _fileMetaCollection.EnsureIndex(file => file.IsFavorite);
             await _fileMetaCollection.EnsureIndex(file => file.ShouldBeShown);

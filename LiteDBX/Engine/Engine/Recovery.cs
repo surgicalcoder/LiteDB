@@ -1,4 +1,4 @@
-﻿using System.Threading;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace LiteDbX.Engine;
@@ -7,7 +7,7 @@ public partial class LiteEngine
 {
     /// <summary>
     /// Recover a corrupt datafile using the async rebuild process.
-    /// Used by the explicit <c>LiteEngine.Open(...)</c> lifecycle.
+    /// Used by the explicit <c>LiteEngine.OpenAsync(...)</c> lifecycle.
     /// </summary>
     private async ValueTask Recovery(Collation collation, CancellationToken cancellationToken)
     {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.IO;
 using System.Threading;
@@ -12,7 +12,7 @@ public partial class LiteEngine
 
     /// <summary>
     /// Detect and upgrade a v7 datafile to the current format before the disk service opens.
-    /// Used by the explicit <c>LiteEngine.Open(...)</c> lifecycle.
+    /// Used by the explicit <c>LiteEngine.OpenAsync(...)</c> lifecycle.
     /// </summary>
     private async ValueTask TryUpgrade(CancellationToken cancellationToken)
     {

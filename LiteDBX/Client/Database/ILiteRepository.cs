@@ -7,12 +7,13 @@ using System.Threading.Tasks;
 namespace LiteDbX;
 
 /// <summary>
-/// Async-only repository convenience wrapper.
+/// Repository convenience wrapper.
 ///
 /// All operations that touch storage are async.
 /// The query builder (<see cref="Query{T}"/>) is synchronous because it only builds a plan.
 /// Lifecycle is managed by <see cref="IAsyncDisposable"/> since the repository owns
-/// an <see cref="ILiteDatabase"/> reference.
+/// an <see cref="ILiteDatabase"/> reference. Open via the concrete type's static
+/// <c>Open(...)</c> or <c>OpenAsync(...)</c> factories.
 /// </summary>
 public interface ILiteRepository : IAsyncDisposable
 {

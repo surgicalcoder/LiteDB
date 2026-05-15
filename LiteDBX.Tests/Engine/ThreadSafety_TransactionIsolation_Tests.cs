@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -16,7 +16,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Concurrent_Writers_On_Same_Collection_Do_Not_Overlap()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(2).TotalSeconds);
 
         var col = db.GetCollection("items");
@@ -62,7 +62,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Concurrent_Writers_On_Different_Collections_Can_Proceed()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(2).TotalSeconds);
 
         var left = db.GetCollection("left");
@@ -101,7 +101,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Reader_Does_Not_See_Uncommitted_Update()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         var col = db.GetCollection<Person>("people");
         await col.Insert(new Person { Id = 1, Name = "before", Age = 20 });
 
@@ -139,7 +139,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Reader_Does_Not_See_Uncommitted_Delete()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         var col = db.GetCollection<Person>("people");
         await col.Insert(new Person { Id = 1, Name = "persisted" });
 
@@ -170,7 +170,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Reader_Does_Not_See_Uncommitted_Insert()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         var col = db.GetCollection<Person>("people");
 
         await using var tx = await db.BeginTransaction();
@@ -187,7 +187,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Snapshot_Remains_Stable_Across_Concurrent_Commit()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         var col = db.GetCollection<Person>("people");
 
         await col.Insert(new[]
@@ -233,7 +233,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Dispose_Without_Commit_Releases_Collection_Lock_And_Transaction_Gate()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         await db.Pragma(Pragmas.TIMEOUT, (int)TimeSpan.FromSeconds(2).TotalSeconds);
         var col = db.GetCollection("items");
 
@@ -253,7 +253,7 @@ public class ThreadSafety_TransactionIsolation_Tests
     [Fact]
     public async Task Ambient_Explicit_Transaction_Does_Not_Bleed_Into_Isolated_Task()
     {
-        await using var db = await LiteDatabase.Open(new MemoryStream());
+        await using var db = await LiteDatabase.OpenAsync(new MemoryStream());
         var ambient = db.GetCollection("ambient");
         var isolated = db.GetCollection("isolated");
 

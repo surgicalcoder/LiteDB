@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Xunit;
 using static LiteDbX.Tests.Issues.Issue1838_Tests;
@@ -11,7 +11,7 @@ public class Pull2468_Tests
     [Fact]
     public async Task Supports_LowerInvariant()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection<TestType>(nameof(TestType));
 
         await collection.Insert(new TestType
@@ -38,7 +38,7 @@ public class Pull2468_Tests
     [Fact]
     public async Task Supports_UpperInvariant()
     {
-        await using var db = await LiteDatabase.Open(":memory:");
+        await using var db = await LiteDatabase.OpenAsync(":memory:");
         var collection = db.GetCollection<TestType>(nameof(TestType));
 
         await collection.Insert(new TestType

@@ -195,7 +195,7 @@ public class SharedEngine : ILiteEngine
 
             if (engine == null)
             {
-                engine = await LiteEngine.Open(_settings, cancellationToken).ConfigureAwait(false);
+                engine = await LiteEngine.OpenAsync(_settings, cancellationToken).ConfigureAwait(false);
             }
 
             Lease lease = null;

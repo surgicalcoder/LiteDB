@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -13,7 +13,7 @@ public class StructFields_Tests
 
         m.IncludeFields = true;
 
-        await using (var db = await LiteDatabase.Open(new MemoryStream(), m, new MemoryStream()))
+        await using (var db = await LiteDatabase.OpenAsync(new MemoryStream(), m, new MemoryStream()))
         {
             var col = db.GetCollection<Point2D>("mytable");
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -17,7 +17,7 @@ public class Crypto_Tests
         var log = new MemoryStream();
         var settings = new EngineSettings { DataStream = data, LogStream = log };
 
-        await using (var e = await LiteEngine.Open(settings))
+        await using (var e = await LiteEngine.OpenAsync(settings))
         {
             await CreateDatabase(e);
 
@@ -35,7 +35,7 @@ public class Crypto_Tests
         var log = new MemoryStream();
         var settings = new EngineSettings { DataStream = data, LogStream = log, Password = "abc", AESEncryption = AESEncryptionType.ECB };
 
-        await using (var e = await LiteEngine.Open(settings))
+        await using (var e = await LiteEngine.OpenAsync(settings))
         {
             await CreateDatabase(e);
 
@@ -61,7 +61,7 @@ public class Crypto_Tests
 
         Func<Task> act = async () =>
         {
-            _ = await LiteEngine.Open(new EngineSettings
+            _ = await LiteEngine.OpenAsync(new EngineSettings
             {
                 DataStream = data,
                 LogStream = log,

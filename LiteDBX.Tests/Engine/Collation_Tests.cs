@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -56,7 +56,7 @@ public class Collation_Tests
         var sortByLinq = names.OrderBy(x => x, collation).ToArray();
         var findByLinq = names.Where(x => collation.Compare(x, "ANA") == 0).ToArray();
 
-        await using var e = await LiteEngine.Open(s);
+        await using var e = await LiteEngine.OpenAsync(s);
 
         await e.Insert("col1", names.Select(x => new BsonDocument { ["name"] = x }), BsonAutoId.Int32);
 
@@ -102,7 +102,7 @@ public class Collation_Tests
         var current = CultureInfo.CurrentCulture;
         CultureInfo.CurrentCulture = new CultureInfo("fi");
 
-        await using (var e = await LiteEngine.Open(new EngineSettings()))
+        await using (var e = await LiteEngine.OpenAsync(new EngineSettings()))
         {
             var d = await e.Pragma(Pragmas.COLLATION);
             d.AsString.Should().Be("fi/IgnoreCase");
@@ -119,14 +119,14 @@ public class Collation_Tests
 
         CultureInfo.CurrentCulture = new CultureInfo("fi");
 
-        await using (var e = await LiteEngine.Open(new EngineSettings { Filename = f.Filename }))
+        await using (var e = await LiteEngine.OpenAsync(new EngineSettings { Filename = f.Filename }))
         {
             await e.Insert("col1", data.Select(x => new BsonDocument { ["_id"] = x }), BsonAutoId.Int32);
         }
 
         CultureInfo.CurrentCulture = new CultureInfo("en-gb");
 
-        await using (var e = await LiteEngine.Open(new EngineSettings { Filename = f.Filename }))
+        await using (var e = await LiteEngine.OpenAsync(new EngineSettings { Filename = f.Filename }))
         {
             await foreach (var id in AsyncEnumerable.ToAsyncEnumerable(data))
             {
@@ -149,7 +149,7 @@ public class Collation_Tests
             Collation = new Collation("en-US/None")
         };
 
-        await using var engine = await LiteEngine.Open(s);
+        await using var engine = await LiteEngine.OpenAsync(s);
         await using var db = new LiteDatabase(engine, disposeOnClose: false);
         var collation = new Collation((await db.Pragma(Pragmas.COLLATION)).AsString);
         collation.Culture.Name.Should().Be("en-US");

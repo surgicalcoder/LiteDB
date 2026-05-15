@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using System;
 using System.Threading.Tasks;
 using Xunit;
@@ -94,7 +94,7 @@ public class Recursion_Tests
     {
         using var file = new TempFile();
 
-        await using var database = await LiteDatabase.Open(new ConnectionString
+        await using var database = await LiteDatabase.OpenAsync(new ConnectionString
         {
             Filename = file.Filename,
             Connection = connectionType

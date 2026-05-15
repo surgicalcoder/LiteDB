@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
@@ -10,7 +10,7 @@ public class Issue2506_Tests
     [Fact]
     public async Task Test()
     {
-        await using LiteDatabase dataBase = await LiteDatabase.Open("demo.db");
+        await using LiteDatabase dataBase = await LiteDatabase.OpenAsync("demo.db");
         var fileStorage = dataBase.GetStorage<string>("myFiles", "myChunks");
 
         // Upload empty test file to file storage
